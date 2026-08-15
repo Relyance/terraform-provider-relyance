@@ -1,0 +1,15 @@
+# Built provider binary at repo root (anchored, so it does NOT match
+# cmd/terraform-provider-relyance/, which holds the tracked entrypoint).
+/terraform-provider-relyance
+dist/
+*.tfstate*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+*.tfvars.json
+*.env
+secrets.env
+.tfrc
+dev.tfrc
+*.pem
+*.key

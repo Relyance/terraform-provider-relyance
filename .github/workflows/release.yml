@@ -1,0 +1,58 @@
+# Release on merge to main, matching the org convention: semantic-release computes the next
+# version from Conventional Commits and creates the vX.Y.Z tag + GitHub Release; GoReleaser then
+# builds, checksums, GPG-signs, and appends the artifacts the Terraform Registry ingests.
+# Required repo secrets: GPG_PRIVATE_KEY (ASCII-armored), PASSPHRASE.
+name: release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Semantic release (tag + GitHub Release from Conventional Commits)
+        uses: ./.github/actions/release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Detect whether semantic-release cut a new tag on this commit.
+      - id: tag
+        run: echo "new=$(git tag --points-at HEAD | grep '^v' | head -n1)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        if: steps.tag.outputs.new != ''
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Import GPG key
+        if: steps.tag.outputs.new != ''
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.PASSPHRASE }}
+
+      - name: Run GoReleaser (sign + append registry artifacts to the release)
+        if: steps.tag.outputs.new != ''
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          args: release --clean
+        env:
+          GORELEASER_CURRENT_TAG: ${{ steps.tag.outputs.new }}
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

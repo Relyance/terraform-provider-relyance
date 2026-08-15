@@ -1,0 +1,27 @@
+name: Semantic Release
+description: Runs semantic-release to bump versions and update release notes
+
+inputs:
+  token:
+    description: 'GitHub token for semantic release'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      working-directory: .github
+      shell: bash
+      run: yarn install --frozen-lockfile
+
+    - name: Run semantic release
+      working-directory: .github
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: npx semantic-release
