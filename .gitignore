@@ -13,3 +13,8 @@ secrets.env
 dev.tfrc
 *.pem
 *.key
+
+# The release workflow's semantic-release step yarn-installs into .github/ on the
+# runner; an untracked node_modules/ makes GoReleaser's dirty-state check refuse
+# to release (the first v1.0.0 attempt failed exactly here).
+node_modules/
