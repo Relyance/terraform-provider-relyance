@@ -1,0 +1,20 @@
+# Default owner for everything in the repo.
+* @Relyance/data-eng
+
+# Security-sensitive areas: team plus a named reviewer.
+/internal/auth/           @Relyance/data-eng @aarora-relyance
+/SECURITY.md              @Relyance/data-eng @aarora-relyance
+/.github/workflows/       @Relyance/data-eng @aarora-relyance
+/.github/actions/         @Relyance/data-eng @aarora-relyance
+/.goreleaser.yaml         @Relyance/data-eng @aarora-relyance
+
+# Supply-chain surfaces: dependency manifests, build scripts, and the vendored
+# generated client (large machine-generated diffs are where a malicious change
+# hides best — same elevated review as the release pipeline).
+/go.mod                   @Relyance/data-eng @aarora-relyance
+/go.sum                   @Relyance/data-eng @aarora-relyance
+/tools/                   @Relyance/data-eng @aarora-relyance
+/scripts/                 @Relyance/data-eng @aarora-relyance
+/internal/apiclient/      @Relyance/data-eng @aarora-relyance
+/.github/package.json     @Relyance/data-eng @aarora-relyance
+/.github/yarn.lock        @Relyance/data-eng @aarora-relyance

@@ -1,0 +1,39 @@
+version: 2
+updates:
+  # Go module dependencies.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+    groups:
+      hashicorp:
+        patterns:
+          - github.com/hashicorp/*
+    open-pull-requests-limit: 10
+
+  # Tooling module (tfplugindocs etc.).
+  - package-ecosystem: gomod
+    directory: /tools
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+
+  # semantic-release toolchain (.github/package.json).
+  - package-ecosystem: npm
+    directory: /.github
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+
+  # GitHub Actions used by the workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - github-actions

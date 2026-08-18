@@ -1,0 +1,52 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - revive        # style + exported-symbol doc comments
+    - godot         # comments end in a period
+    - misspell
+    - unconvert
+    - unparam
+    - gocritic
+    - bodyclose     # HTTP response bodies are closed
+    - errname
+    - nilerr
+    - copyloopvar
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: error-strings
+        - name: error-return
+        - name: context-as-argument
+        - name: indent-error-flow
+        - name: unexported-return
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+  exclusions:
+    rules:
+      # Test files may skip exported-doc requirements and short-lived-body closing.
+      - path: _test\.go
+        linters:
+          - revive
+          - unparam
+          - bodyclose
+      # The internal/client facade makes no direct HTTP calls: every request goes
+      # through the generated internal/apiclient, whose Execute() reads and closes
+      # the response body before returning it (as a NopCloser). bodyclose can't
+      # see through the generated layer, so it false-positives here.
+      - path: internal/client/
+        linters:
+          - bodyclose
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -1,0 +1,2505 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Integrations API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/integrations/catalog/v1/vendors": {
+      "get": {
+        "operationId": "list_integration_catalog_v1",
+        "summary": "List the vendor integration catalog, license/feature-flag filtered.",
+        "description": "Lists the static vendor integration catalog (271 configs), served from the git-authored\ncorpus (`catalog/data/*.yaml`) and tenant-filtered exactly like the SDK's own\n`Integrations().get_config()` did (verified bug-for-bug -- see\n`services.catalog.filtering`'s module docstring): a KIND within a vendor that requires a\nlicense/feature-flag the tenant lacks is omitted from that vendor's `kinds`, but the\nvendor-level `required_licenses` check (e.g. AI Governance) never omits the whole vendor --\nthat gate is dead code in the underlying SDK on the live serving path, and this endpoint\nintentionally reproduces that, not a stricter (but non-equivalent) reading of it. Optionally\nfiltered to a single integration type via the `type` query param (e.g. `VENDOR` or\n`INTEGRATION_TYPE_VENDOR`).",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "description": "Integration type name, e.g. VENDOR or INTEGRATION_TYPE_VENDOR.",
+            "required": false,
+            "schema": {
+              "description": "Integration type name, e.g. VENDOR or INTEGRATION_TYPE_VENDOR.",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogEntrySerializer"
+                  },
+                  "title": "Response List Integration Catalog V1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Vendor not found in catalog",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Vendor not found in catalog",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Vendor not found in catalog",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Vendor not found in catalog",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Vendor not found in catalog",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/catalog/v1/vendors/{vendor_key}": {
+      "get": {
+        "operationId": "get_integration_catalog_entry_v1",
+        "summary": "Get a single vendor\u2019s catalog entry.",
+        "description": "Fetches a single vendor's catalog entry (proto-shaped `IntegrationConfig` JSON, license/\nfeature-flag filtered exactly like `/vendors` -- see that endpoint's description). 404 when\nthe vendor key is unknown or doesn't match the `type` filter.",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "description": "Integration type name, e.g. VENDOR or INTEGRATION_TYPE_VENDOR.",
+            "required": false,
+            "schema": {
+              "description": "Integration type name, e.g. VENDOR or INTEGRATION_TYPE_VENDOR.",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntrySerializer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Vendor not found in catalog",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Vendor not found in catalog",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Vendor not found in catalog",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Vendor not found in catalog",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Vendor not found in catalog",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/classification/v1/business-nodes": {
+      "get": {
+        "operationId": "business_nodes_v1",
+        "summary": "List business nodes",
+        "description": "Paginated list of a tenant's business nodes, with a vendor-doc fallback for BUSINESS_ENTITY nodes' description/business-models. Mirrors enterprise-api GET /v1/internal/business-nodes.",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1000,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "page_num",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page Num"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponseSerializer_BusinessNodeSerializer_"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/connections/v1/{vendor_key}": {
+      "get": {
+        "operationId": "list_vendor_connections_v1",
+        "summary": "List a vendor\u2019s connections.",
+        "description": "Lists every connection configured for a vendor, from the tenant's `vendors` document\n(`vendors.integrations`). Each entry is the raw connection sub-doc (SDK/mgr field\nnames preserved) plus its `id`.",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConnectionSummarySerializer"
+                  },
+                  "title": "Response List Vendor Connections V1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      },
+      "post": {
+        "operationId": "create_vendor_connection_v1",
+        "summary": "Create a new connection for a vendor.",
+        "description": "Creates a new connection for a vendor. Allocates the next per-vendor connection id\n(mirrors mgr's monotonic `vendor_connection_next_id` counter) and seeds the\n`vendors.integrations.<id>` sub-doc with `auth: {type: null, status: AUTH_STATUS_NOT_CONNECTED}`.\n\nWhen the vendor's `status` is `Inactive`, an existing never-configured connection with the\nsame `connection_name`/`integrationType` is reused (its id is returned) instead of creating a\nduplicate. Otherwise the new connection is auto-associated with the tenant's own business\nentity (`business_node_ids`) if one exists, and auto-selects `kinds` the vendor only supports\none of, plus `INTEGRATION_KIND_PROPERTY_INSPECTION`/`INTEGRATION_KIND_ASSETS_DISCOVERY` when\nthe vendor supports them (mirrors mgr's `create_connection`).\n\nReturns 201 with the created connection resource (the sub-doc as stored, including `id`) and\na `Location` header pointing at `GET .../connections/v1/{vendor_key}/{connection_id}`.\n\nSee `docs/integration-setup-example.md` for a full worked example (catalog read through\ncreate/validate/save/connect/poll/kind-selection) with real request/response JSON.",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConnectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionSummarySerializer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/connections/v1/{vendor_key}/{connection_id}": {
+      "get": {
+        "operationId": "get_vendor_connection_v1",
+        "summary": "Get connection detail, including masked auth configs and kind configs.",
+        "description": "Fetches one connection's full detail: the raw connection sub-doc, its auth field\nconfigs (secret-masked per `get_vendor_connection_auth_configs`'s own masking rules --\nsupport users without `relyanceSecretAccess`, or the `hide-integration-secrets` tenant\nflag), and its kind field configs.",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionDetailSerializer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      },
+      "patch": {
+        "operationId": "update_vendor_connection_v1",
+        "summary": "Update scalar sub-doc fields on a connection.",
+        "description": "Updates one or more scalar sub-doc fields on an existing connection\n(`refreshFrequency`, `startScanFrom`, `dataStorageLocation`, `businessNodeIds`,\n`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`). Only fields present in\nthe request body are written, via a dotted-path `$set` -- never a whole-document replace.\n\nWhen the write includes `refreshFrequency` and/or `startScanFrom`, a best-effort \"conductor\npoke\" is scheduled off the request path afterward (mirrors mgr's\n`connSetRefreshFrequency`/`connSetStartScanFrom`) so the scan scheduler picks up the new\ncadence without waiting for a restart. The poke never blocks or fails the response --\nscheduling or publishing it is not on the request's critical path.\n\nReturns 204 with no body, including when the request body has no recognized fields to write\n(a no-op). Poll `GET .../{connection_id}` to observe the updated resource.",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScalarUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_vendor_connection_v1",
+        "summary": "Delete a connection (best-effort secret cleanup first).",
+        "description": "Deletes a connection. Best-effort deletes its GCP Secret Manager secret first (mirrors\n`deleteConnectionSecrets` -- a no-op, not an error, if the connection never had a secret),\nthen `$unset`s the `vendors.integrations.<id>` sub-doc.\n\nReturns 204 with no body.",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/connections/v1/{vendor_key}/{connection_id}/auth/validate": {
+      "post": {
+        "operationId": "validate_vendor_connection_auth_v1",
+        "summary": "Validate auth-field values without persisting them.",
+        "description": "Validates a set of auth-field values against the vendor's auth form without persisting\nanything (`Field.fill()` + `validate()`, or `validate_byok()` when the connection's\n`runtime_mode` is `IN_HOST_BYOK`, which skips secret-field validation).",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthValidateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthValidateResponseSerializer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/connections/v1/{vendor_key}/{connection_id}/auth": {
+      "put": {
+        "operationId": "save_vendor_connection_auth_v1",
+        "summary": "Save auth-field values (is_top_level split; secrets to GCP Secret Manager).",
+        "description": "Saves auth-field values for a connection. Fields flagged `is_top_level` on the vendor's\nauth form are written as flat scalars on the connection sub-doc; every other field is\nstored as a GCP Secret Manager secret. No-op when the connection's `runtime_mode` is\n`IN_HOST_BYOK` -- BYOK connections never have server-side secrets.\n\nFor `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the\n`auth.secret_path` built against) the tenant's own GCP project rather than the service's\ndefault project. Every save also sets `auth.updated_at` (epoch seconds); when secret fields\nwere saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 digest of the\nsaved secret fields only, letting a future Terraform provider detect credential drift\nwithout ever reading a secret value back.\n\nReturns 204 with no body (including the BYOK no-op case).",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthSaveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/connections/v1/{vendor_key}/{connection_id}/kinds/{kind}/validate": {
+      "post": {
+        "operationId": "validate_vendor_connection_kind_v1",
+        "summary": "Validate kind-parameter values without persisting them.",
+        "description": "Validates a set of parameter values against one of the vendor's kind forms\n(`Field.fill()` + `validate()` -- kind params have no BYOK branch).",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Kind"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KindValidateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthValidateResponseSerializer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/connections/v1/{vendor_key}/{connection_id}/kinds/{kind}": {
+      "put": {
+        "operationId": "save_vendor_connection_kind_v1",
+        "summary": "Save parameter values for an already-selected kind.",
+        "description": "Saves parameter values for one of a connection's already-selected kinds\n(`kinds.<kind>.customFields`). The kind must already exist on the connection.\n\nReturns 204 with no body.",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Kind"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KindSaveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/connections/v1/{vendor_key}/{connection_id}/kinds/{kind}/selection": {
+      "put": {
+        "operationId": "select_vendor_connection_kind_v1",
+        "summary": "Select or deselect an IntegrationKind on a connection.",
+        "description": "Selects or deselects an `IntegrationKind` on a connection (mirrors mgr's `connSetCheckbox`\nmutation, which takes the same single `selected: bool` argument). Selecting a kind for the\nfirst time creates its `kinds.<kind>` sub-doc (`{isSelected, customFields: []}`); selecting\none that already exists only flips its `isSelected` flag, leaving any saved `customFields`\nin place. `INTEGRATION_KIND_ASSETS_DISCOVERY` is always forced to selected regardless of the\nrequest body -- it's always enabled and hidden from the UI. Once a kind has a `kinds.<kind>`\nentry (selected or not), `PUT .../kinds/{kind}` can save parameters for it.\n\nReturns 204 with no body.",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Kind"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KindSelectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/connections/v1/{vendor_key}/{connection_id}/connect": {
+      "post": {
+        "operationId": "connect_vendor_connection_v1",
+        "summary": "Kick off a live connect/test attempt (async; poll GET for the result).",
+        "description": "Kicks off a live connect/test attempt for a connection and returns 202 immediately with a\nmonitor body `{\"id\", \"status\": \"connecting\"}`; the actual vendor-API call (dispatched by\nAuthType) runs in the background and updates `auth.status`/`auth.error` on completion. Poll\n`GET .../connections/{connection_id}` to observe the result.",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectResponseSerializer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    },
+    "/api/integrations/connections/v1/{vendor_key}/{connection_id}/disconnect": {
+      "post": {
+        "operationId": "disconnect_vendor_connection_v1",
+        "summary": "Mark a connection as disconnected.",
+        "description": "Marks a connection as disconnected (`auth.status = AUTH_STATUS_NOT_CONNECTED`). Purely a\nMongo write -- no vendor-API call.\n\nReturns 204 with no body.",
+        "parameters": [
+          {
+            "name": "vendor_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vendor Key"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response",
+            "headers": {
+              "RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimit-Limit"
+              },
+              "RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimit-Remaining"
+              },
+              "RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimit-Reset"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Terraform"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AuthSaveRequest": {
+        "description": "Mirrors ``connSaveAuthParameters``'s ``config`` argument.",
+        "type": "object",
+        "properties": {
+          "authKey": {
+            "type": "string",
+            "title": "Authkey"
+          },
+          "customCreds": {
+            "type": "object",
+            "title": "Customcreds"
+          }
+        },
+        "required": [
+          "authKey"
+        ],
+        "title": "AuthSaveRequest"
+      },
+      "AuthValidateRequest": {
+        "description": "Mirrors ``connValidateAuthParameters``'s ``config`` argument.",
+        "type": "object",
+        "properties": {
+          "authKey": {
+            "description": "The vendor auth config's key (stored at connection.auth.type).",
+            "type": "string",
+            "title": "Authkey"
+          },
+          "customCreds": {
+            "type": "object",
+            "title": "Customcreds"
+          }
+        },
+        "required": [
+          "authKey"
+        ],
+        "title": "AuthValidateRequest"
+      },
+      "AuthValidateResponseSerializer": {
+        "type": "object",
+        "properties": {
+          "isValid": {
+            "type": "boolean",
+            "title": "Isvalid"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "fieldResults": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "title": "Fieldresults"
+          }
+        },
+        "required": [
+          "isValid"
+        ],
+        "title": "AuthValidateResponseSerializer"
+      },
+      "BusinessNodeSerializer": {
+        "description": "Mirrors ``models.business_nodes.BusinessNode`` - including its vendor-doc\nfallback logic for ``BUSINESS_ENTITY`` nodes, applied via a context-aware\n``model_validator(mode='after')`` exactly as the original does.",
+        "type": "object",
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "$ref": "#/components/schemas/BusinessNodeType"
+          },
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Vendors"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Services"
+          },
+          "processing_activities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Processing Activities"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "business_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Business Models"
+          },
+          "created_date": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created Date"
+          },
+          "updated_date": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated Date"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources"
+          }
+        },
+        "required": [
+          "record_id",
+          "name",
+          "type"
+        ],
+        "title": "BusinessNodeSerializer"
+      },
+      "BusinessNodeType": {
+        "type": "string",
+        "title": "BusinessNodeType",
+        "description": "Business node type (e.g. TYPE_BUSINESS_ENTITY, TYPE_PRODUCT). Served as an open string so new server-side types never break deserialization in already-shipped clients."
+      },
+      "CatalogEntrySerializer": {
+        "type": "object",
+        "properties": {
+          "vendorKey": {
+            "type": "string",
+            "title": "Vendorkey"
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "vendorKey"
+        ],
+        "title": "CatalogEntrySerializer"
+      },
+      "ConnectResponseSerializer": {
+        "description": "202 body for ``POST .../connect`` -- a monitor representation of the in-flight\nattempt (the live test itself runs in the background; poll ``GET .../{connection_id}``\nfor the eventual result).",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "default": "connecting",
+            "title": "Status"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ConnectResponseSerializer"
+      },
+      "ConnectionDetailSerializer": {
+        "description": "Connection sub-doc + masked auth configs + kind configs (all SDK-shaped, passthrough).",
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "object",
+            "title": "Connection"
+          },
+          "authConfigs": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "title": "Authconfigs"
+          },
+          "kindConfigs": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "title": "Kindconfigs"
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "connection"
+        ],
+        "title": "ConnectionDetailSerializer"
+      },
+      "ConnectionSummarySerializer": {
+        "description": "One entry of ``vendors.integrations`` -- the raw connection sub-doc plus its id.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "id"
+        ],
+        "title": "ConnectionSummarySerializer"
+      },
+      "CreateConnectionRequest": {
+        "description": "Mirrors ``createConnection(vendor_key, new_name, integration_type)`` args.",
+        "type": "object",
+        "properties": {
+          "connectionName": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Connectionname"
+          },
+          "integrationType": {
+            "description": "IntegrationType enum name, e.g. INTEGRATION_TYPE_VENDOR.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrationtype"
+          }
+        },
+        "required": [
+          "connectionName"
+        ],
+        "title": "CreateConnectionRequest"
+      },
+      "DataStorageLocation": {
+        "description": "Typed data-residency Location -- the region/country/state triple the SDK's\n``data_storage_location`` LocationSelect field carries (relyance_sdk\n``auth/integration_configs/common/region.py``: the canonical ROPA/DSR Location shape).\nStored as a structured dict on the connection sub-doc; empty parts are dropped on write.",
+        "type": "object",
+        "properties": {
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "additionalProperties": false,
+        "title": "DataStorageLocation"
+      },
+      "KindSaveRequest": {
+        "type": "object",
+        "properties": {
+          "parameters": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Parameters",
+            "type": "array"
+          }
+        },
+        "title": "KindSaveRequest"
+      },
+      "KindSelectRequest": {
+        "description": "Mirrors ``connSetCheckbox(kind, selected: bool)``'s single ``selected`` argument.",
+        "type": "object",
+        "properties": {
+          "selected": {
+            "type": "boolean",
+            "title": "Selected"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "selected"
+        ],
+        "title": "KindSelectRequest"
+      },
+      "KindValidateRequest": {
+        "type": "object",
+        "properties": {
+          "parameters": {
+            "title": "Parameters",
+            "type": "object"
+          }
+        },
+        "title": "KindValidateRequest"
+      },
+      "PaginatedResponseSerializer_BusinessNodeSerializer_": {
+        "type": "object",
+        "properties": {
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
+          },
+          "page_num": {
+            "type": "integer",
+            "title": "Page Num"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessNodeSerializer"
+            },
+            "title": "Results"
+          }
+        },
+        "required": [
+          "total_count",
+          "page_num",
+          "page_size",
+          "results"
+        ],
+        "title": "PaginatedResponseSerializer[BusinessNodeSerializer]"
+      },
+      "ScalarUpdateRequest": {
+        "description": "Consolidated single-field setters -- mirrors ``connSetName``/``connSetRefreshFrequency``/\n``connSetStartScanFrom``/``connSetDataStorageLocation``/``connSetBusinessNodeIds``/\n``connSetCredentialsExpireAt``/``connUpdateRelyanceSecretAccess``. Every field is optional;\nonly the ones present in the request are written.",
+        "type": "object",
+        "properties": {
+          "connectionName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connectionname"
+          },
+          "refreshFrequency": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refreshfrequency"
+          },
+          "startScanFrom": {
+            "anyOf": [
+              {
+                "type": "number",
+                "format": "double"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startscanfrom"
+          },
+          "dataStorageLocation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DataStorageLocation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "businessNodeIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Businessnodeids"
+          },
+          "credentialsExpireAt": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credentialsexpireat"
+          },
+          "relyanceSecretAccess": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relyancesecretaccess"
+          }
+        },
+        "additionalProperties": false,
+        "title": "ScalarUpdateRequest"
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "maximum": 599,
+            "minimum": 100
+          },
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string",
+            "format": "uri"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "status"
+        ]
+      }
+    },
+    "headers": {
+      "RateLimit-Limit": {
+        "schema": {
+          "type": "string"
+        },
+        "description": "<limit>;w=<window>"
+      },
+      "RateLimit-Remaining": {
+        "schema": {
+          "type": "string"
+        },
+        "description": "Requests left in window"
+      },
+      "RateLimit-Reset": {
+        "schema": {
+          "type": "string"
+        },
+        "description": "Epoch seconds until reset"
+      }
+    },
+    "responses": {
+      "TooManyRequests": {
+        "description": "Rate limit exceeded",
+        "headers": {
+          "RateLimit-Limit": {
+            "$ref": "#/components/headers/RateLimit-Limit"
+          },
+          "RateLimit-Remaining": {
+            "$ref": "#/components/headers/RateLimit-Remaining"
+          },
+          "RateLimit-Reset": {
+            "$ref": "#/components/headers/RateLimit-Reset"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "BearerJWT": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Use a JWT issued by the Identity Service."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Terraform"
+    }
+  ],
+  "security": [
+    {
+      "BearerJWT": []
+    }
+  ],
+  "x-generated-by": "custom-openapi-problem-v3"
+}
