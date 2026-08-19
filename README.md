@@ -7,7 +7,8 @@ connections (create, configure auth and scan kinds, import, delete) against
 integrations-api, authenticating as a tenant OAuth client (`client_credentials`
 with a client secret or `private_key_jwt`).
 
-> Status: pre-release. Requires Terraform **>= 1.11** (write-only secret arguments).
+Available on the [Terraform Registry](https://registry.terraform.io/providers/Relyance/relyance/latest).
+Requires Terraform **>= 1.11** (write-only secret arguments).
 
 ## Using the provider
 
@@ -16,7 +17,7 @@ terraform {
   required_providers {
     relyance = {
       source  = "relyance/relyance"
-      version = "~> 0.1"
+      version = "~> 1.0"
     }
   }
 }
