@@ -8,15 +8,17 @@ module.exports = {
     "preset": "conventionalcommits",
     "presetConfig": {
     },
+    // `chore`, `build` and `docs` are deliberately ABSENT: they fall through to the
+    // conventionalcommits preset, which does not release. A published provider version is
+    // something customers pin, so dependency bumps, CI tweaks and README edits must not mint
+    // one on their own -- they ride along with the next feat/fix instead. Everything still
+    // listed here does cut a patch.
     "releaseRules": [
-          { "type": "docs", "release": "patch" },
           { "type": "style", "release": "patch" },
           { "type": "refactor", "release": "patch" },
           { "type": "perf", "release": "patch" },
           { "type": "test", "release": "patch" },
-          { "type": "build", "release": "patch" },
           { "type": "ci", "release": "patch" },
-          { "type": "chore", "release": "patch" },
           { "type": "revert", "release": "patch" },
         ],
     "parserOpts": {
