@@ -60,6 +60,16 @@ func (f *fakeService) SaveAuth(_ context.Context, vendorKey, id string, req clie
 func (f *fakeService) ValidateAuth(_ context.Context, vendorKey, id string, req client.AuthSaveRequest) (*client.ValidateResult, error) {
 	f.calls = append(f.calls, fmt.Sprintf("validate %s/%s %s", vendorKey, id, req.AuthKey))
 	f.validateReqs = append(f.validateReqs, req)
+	// Like the server: auth is validated against the connection's stored
+	// runtime_mode, and a secretRef is refused unless that mode is BYOK.
+	stored := client.RuntimeModeRelyanceHosted
+	if f.detail != nil {
+		stored = f.detail.RuntimeMode()
+	}
+	if req.SecretRef != nil && *req.SecretRef != "" && stored != client.RuntimeModeInHostBYOK {
+		msg := "A secret reference can only be set on an InHost BYOK connection. Set the runtime mode to IN_HOST_BYOK first."
+		return &client.ValidateResult{IsValid: false, Error: &msg}, nil
+	}
 	return &client.ValidateResult{IsValid: true}, nil
 }
 

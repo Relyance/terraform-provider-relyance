@@ -369,9 +369,12 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 	}
 
 	// A secret_ref change rides on the auth save (the server takes it with
-	// the auth method); removing it from config sends "" to clear it.
+	// the auth method); removing it from config sends "" to clear it. Leaving
+	// BYOK also saves auth: Relyance holds no credentials for a BYOK connection,
+	// so the new mode needs the configured ones (plan-time checks they are set).
 	secretRef := secretRefWire(plan.SecretRef, &state, plannedRuntimeMode(&plan, &state))
-	if authChanged(plan.Auth, state.Auth) || secretRef != nil {
+	leaving := leavingBYOK(&state, plan.RuntimeMode.ValueString(), knownString(plan.RuntimeMode))
+	if authChanged(plan.Auth, state.Auth) || secretRef != nil || leaving {
 		if !r.saveAuth(ctx, req.Config, &plan, secretRef, &resp.Diagnostics) {
 			return
 		}
@@ -502,6 +505,7 @@ func (r *connectionResource) ModifyPlan(ctx context.Context, req resource.Modify
 		cfgSecrets = cfg.Auth.SecretsWO
 	}
 	resp.Diagnostics.Append(byokPlanDiags(ctx, &plan, mode, modeKnown, cfgSecrets)...)
+	resp.Diagnostics.Append(modeSwitchCredentialDiags(ctx, &cfg, state, mode, modeKnown)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -529,8 +533,22 @@ func (r *connectionResource) ModifyPlan(ctx context.Context, req resource.Modify
 	}
 
 	if plan.Auth != nil {
-		r.validateAuthPlan(ctx, req, resp, &plan, modeKnown && mode == client.RuntimeModeInHostBYOK, vendor)
+		// The server validates auth against the connection's stored runtime_mode.
+		// When this apply changes it, that answer is for the wrong mode (for
+		// example, secretRef is refused on a connection that is not yet BYOK), so
+		// only the catalog checks run; the apply's auth save enforces the rest.
+		serverValidate := state != nil && modeKnown && storedRuntimeMode(state) == mode
+		r.validateAuthPlan(ctx, req, resp, &plan, modeKnown && mode == client.RuntimeModeInHostBYOK, serverValidate, vendor)
 	}
+}
+
+// storedRuntimeMode is the runtime_mode the server has for the connection in
+// state (RELYANCE_HOSTED when the state has none).
+func storedRuntimeMode(state *resourceModel) string {
+	if knownString(state.RuntimeMode) {
+		return state.RuntimeMode.ValueString()
+	}
+	return client.RuntimeModeRelyanceHosted
 }
 
 // ValidateConfig runs the config-only secret_ref checks (no state or network),
@@ -545,14 +563,16 @@ func (r *connectionResource) ValidateConfig(ctx context.Context, req resource.Va
 }
 
 // validateAuthPlan runs the catalog-backed structural checks on the auth
-// block, and — for connections that already exist — the server's
-// side-effect-free semantic validation. Unknown values skip gracefully.
+// block, and — when serverValidate is set (a connection that already exists
+// and keeps its runtime_mode) — the server's side-effect-free semantic
+// validation. Unknown values skip gracefully.
 func (r *connectionResource) validateAuthPlan(
 	ctx context.Context,
 	req resource.ModifyPlanRequest,
 	resp *resource.ModifyPlanResponse,
 	plan *resourceModel,
 	byok bool,
+	serverValidate bool,
 	vendor *client.Vendor,
 ) {
 	authPath := path.Root("auth")
@@ -637,7 +657,7 @@ func (r *connectionResource) validateAuthPlan(
 
 	// Server-side semantic validation — only possible for connections that
 	// already exist (the endpoint is per-connection).
-	if plan.ID.IsNull() || plan.ID.IsUnknown() {
+	if !serverValidate || plan.ID.IsNull() || plan.ID.IsUnknown() {
 		return
 	}
 	creds, mdiags := mergeAuthCreds(ctx, plan.Auth.Params, secrets)

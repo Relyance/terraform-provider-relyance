@@ -592,7 +592,7 @@ func TestModifyPlanWiring(t *testing.T) {
 				{Key: "ORG_ID", IsThisSecret: true},
 				{Key: "API_KEY", IsThisSecret: true},
 			},
-		}}}}
+		}}}, detail: &client.ConnectionDetail{Connection: map[string]any{"runtime_mode": client.RuntimeModeInHostBYOK}}}
 		r := &connectionResource{svc: f, validateOnPlan: true}
 
 		stateVals := h.stateVals(client.RuntimeModeInHostBYOK, ptr(testARN), true)
@@ -795,11 +795,15 @@ func TestUpdateSwitchAwayFromBYOK(t *testing.T) {
 	}}}
 	r := &connectionResource{svc: f}
 	state := h.obj(h.stateVals(client.RuntimeModeInHostBYOK, ptr(testARN), true))
-	plan := h.obj(h.stateVals(client.RuntimeModeRelyanceHosted, nil, true))
-	cfg := h.obj(map[string]tftypes.Value{"auth": h.authVal(nil, nil), "runtime_mode": str(client.RuntimeModeRelyanceHosted)})
+	// The auth block itself is unchanged: only the mode change makes the save.
+	planVals := h.stateVals(client.RuntimeModeRelyanceHosted, nil, true)
+	cfg := h.obj(map[string]tftypes.Value{
+		"auth":         h.authVal(nil, map[string]string{"ORG_ID": "o", "API_KEY": "k"}),
+		"runtime_mode": str(client.RuntimeModeRelyanceHosted),
+	})
 	req := resource.UpdateRequest{
 		Config: tfsdk.Config{Schema: h.schema, Raw: cfg},
-		Plan:   tfsdk.Plan{Schema: h.schema, Raw: plan},
+		Plan:   tfsdk.Plan{Schema: h.schema, Raw: h.obj(planVals)},
 		State:  tfsdk.State{Schema: h.schema, Raw: state},
 	}
 	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: h.schema, Raw: state}}
@@ -817,9 +821,175 @@ func TestUpdateSwitchAwayFromBYOK(t *testing.T) {
 			t.Fatalf("runtime_mode sent twice: %+v", f.scalarReqs)
 		}
 	}
-	if len(f.saveReqs) != 0 {
-		t.Fatalf("no auth save expected (the server clears secret_ref): %+v", f.saveReqs)
+	// Relyance holds no credentials for a BYOK connection: the auth block is
+	// saved again after the switch, with the configured values and no
+	// secretRef (the server clears it itself).
+	if len(f.saveReqs) != 1 {
+		t.Fatalf("save reqs = %+v", f.saveReqs)
 	}
+	got := f.saveReqs[0]
+	if got.SecretRef != nil || got.AuthKey != "api-key" ||
+		got.CustomCreds["ORG_ID"] != "o" || got.CustomCreds["API_KEY"] != "k" {
+		t.Fatalf("save req = %+v", got)
+	}
+	patch, save := -1, -1
+	for i, c := range f.calls {
+		if strings.HasPrefix(c, "patch") && patch < 0 {
+			patch = i
+		}
+		if strings.HasPrefix(c, "saveauth") {
+			save = i
+		}
+	}
+	if patch < 0 || save < patch {
+		t.Fatalf("auth must be saved after the runtime_mode PATCH: %v", f.calls)
+	}
+}
+
+// catalogFake is a fake whose vendor has one api-key method (a top-level
+// data_storage_location and two secrets) and whose stored connection has
+// runtime_mode stored.
+func catalogFake(stored string) *fakeService {
+	return &fakeService{
+		vendor: &client.Vendor{VendorKey: "atlassian_jira", AuthConfigs: []client.AuthConfig{{
+			Slug: "api-key", Key: "AUTH_TYPE_API_KEY",
+			CustomFields: []client.CustomField{
+				{Key: "data_storage_location", IsTopLevel: true},
+				{Key: "ORG_ID", IsThisSecret: true},
+				{Key: "API_KEY", IsThisSecret: true},
+			},
+		}}},
+		detail: &client.ConnectionDetail{Connection: map[string]any{"runtime_mode": stored}},
+	}
+}
+
+func TestModifyPlanRuntimeModeChangeWithAuth(t *testing.T) {
+	h := newHarness(t)
+	top := map[string]string{"data_storage_location": "us"}
+	secrets := map[string]string{"ORG_ID": "o", "API_KEY": "k"}
+
+	cases := []struct {
+		name     string
+		from, to string
+		ref      *string // config and plan secret_ref
+		secrets  map[string]string
+	}{
+		{"hosted to BYOK with secret_ref", client.RuntimeModeRelyanceHosted, client.RuntimeModeInHostBYOK, ptr(testARN), nil},
+		{"hosted to BYOK with a Kubernetes secret", client.RuntimeModeRelyanceHosted, client.RuntimeModeInHostBYOK, nil, nil},
+		{"IN_HOST to BYOK with secret_ref", client.RuntimeModeInHost, client.RuntimeModeInHostBYOK, ptr(testARN), nil},
+		{"BYOK to hosted with credentials", client.RuntimeModeInHostBYOK, client.RuntimeModeRelyanceHosted, nil, secrets},
+		{"BYOK to IN_HOST with credentials", client.RuntimeModeInHostBYOK, client.RuntimeModeInHost, nil, secrets},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := catalogFake(tc.from)
+			r := &connectionResource{svc: f, validateOnPlan: true}
+			state := h.obj(h.stateVals(tc.from, nil, true))
+			planVals := h.stateVals(tc.to, tc.ref, false)
+			planVals["auth"] = h.authVal(top, nil)
+			cfgVals := map[string]tftypes.Value{"auth": h.authVal(top, tc.secrets), "runtime_mode": str(tc.to)}
+			if tc.ref != nil {
+				cfgVals["secret_ref"] = str(*tc.ref)
+			}
+			resp := h.modifyPlan(r, h.obj(cfgVals), h.obj(planVals), state)
+			if resp.Diagnostics.HasError() {
+				t.Fatal(resp.Diagnostics)
+			}
+			// The server would validate against the stored mode, which this
+			// apply changes: only the catalog checks run at plan time.
+			if len(f.validateReqs) != 0 {
+				t.Fatalf("server validate must be skipped across a runtime_mode change: %+v", f.validateReqs)
+			}
+		})
+	}
+
+	t.Run("same mode still validates on the server", func(t *testing.T) {
+		f := catalogFake(client.RuntimeModeInHostBYOK)
+		r := &connectionResource{svc: f, validateOnPlan: true}
+		state := h.obj(h.stateVals(client.RuntimeModeInHostBYOK, nil, true))
+		planVals := h.stateVals(client.RuntimeModeInHostBYOK, ptr(testARN), false)
+		planVals["auth"] = h.authVal(top, nil)
+		cfg := h.obj(map[string]tftypes.Value{"auth": h.authVal(top, nil), "secret_ref": str(testARN)})
+		resp := h.modifyPlan(r, cfg, h.obj(planVals), state)
+		if resp.Diagnostics.HasError() {
+			t.Fatal(resp.Diagnostics)
+		}
+		if len(f.validateReqs) != 1 {
+			t.Fatalf("validate reqs = %+v", f.validateReqs)
+		}
+	})
+
+	t.Run("the fake refuses secretRef on a stored non-BYOK mode, like the server", func(t *testing.T) {
+		f := catalogFake(client.RuntimeModeRelyanceHosted)
+		res, err := f.ValidateAuth(context.Background(), "atlassian_jira", "3", client.AuthSaveRequest{AuthKey: "api-key", SecretRef: ptr(testARN)})
+		if err != nil || res.IsValid {
+			t.Fatalf("result = %+v, %v", res, err)
+		}
+	})
+}
+
+func TestModifyPlanLeavingBYOKNeedsCredentials(t *testing.T) {
+	h := newHarness(t)
+	state := h.obj(h.stateVals(client.RuntimeModeInHostBYOK, ptr(testARN), true))
+	top := map[string]string{"data_storage_location": "us"}
+
+	cases := []struct {
+		name    string
+		cfgAuth tftypes.Value // nil: no auth block
+		wantErr bool
+	}{
+		{"auth block without secrets_wo", h.authVal(top, nil), true},
+		{"auth block with empty secrets_wo", h.authVal(top, map[string]string{}), true},
+		{"no auth block", tftypes.Value{}, true},
+		{"auth block with secrets_wo", h.authVal(top, map[string]string{"API_KEY": "k"}), false},
+		{
+			"unknown secrets_wo is left to the apply",
+			tfObject(h.auth, map[string]tftypes.Value{
+				"method":     str("api-key"),
+				"secrets_wo": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, tftypes.UnknownValue),
+			}),
+			false,
+		},
+	}
+	for _, tc := range cases {
+		for _, to := range []string{client.RuntimeModeRelyanceHosted, client.RuntimeModeInHost, client.RuntimeModeInHome} {
+			t.Run(tc.name+" to "+to, func(t *testing.T) {
+				cfgVals := map[string]tftypes.Value{"runtime_mode": str(to)}
+				planVals := h.stateVals(to, nil, false)
+				if tc.cfgAuth.Type() != nil {
+					cfgVals["auth"] = tc.cfgAuth
+					planVals["auth"] = h.authVal(top, nil)
+				}
+				// No service: the check needs no network and ignores validate_on_plan.
+				resp := h.modifyPlan(&connectionResource{}, h.obj(cfgVals), h.obj(planVals), state)
+				if got := hasErrorAt(resp.Diagnostics, path.Root("auth").AtName("secrets_wo")); got != tc.wantErr {
+					t.Fatalf("error = %v, want %v: %v", got, tc.wantErr, resp.Diagnostics)
+				}
+				if tc.wantErr && !strings.Contains(resp.Diagnostics.Errors()[0].Detail(), to) {
+					t.Fatalf("detail should name the mode: %v", resp.Diagnostics)
+				}
+			})
+		}
+	}
+
+	t.Run("staying on BYOK needs nothing", func(t *testing.T) {
+		cfg := h.obj(map[string]tftypes.Value{"auth": h.authVal(top, nil), "secret_ref": str(testARN)})
+		plan := h.obj(h.stateVals(client.RuntimeModeInHostBYOK, ptr(testARN), true))
+		resp := h.modifyPlan(&connectionResource{}, cfg, plan, state)
+		if resp.Diagnostics.HasError() {
+			t.Fatal(resp.Diagnostics)
+		}
+	})
+
+	t.Run("hosted to IN_HOST needs nothing", func(t *testing.T) {
+		hosted := h.obj(h.stateVals(client.RuntimeModeRelyanceHosted, nil, true))
+		cfg := h.obj(map[string]tftypes.Value{"auth": h.authVal(top, nil), "runtime_mode": str(client.RuntimeModeInHost)})
+		plan := h.obj(h.stateVals(client.RuntimeModeInHost, nil, true))
+		resp := h.modifyPlan(&connectionResource{}, cfg, plan, hosted)
+		if resp.Diagnostics.HasError() {
+			t.Fatal(resp.Diagnostics)
+		}
+	})
 }
 
 func ptr[T any](v T) *T { return &v }
