@@ -179,21 +179,25 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			},
 			"secret_ref": schema.StringAttribute{
 				Optional: true,
-				Description: "InHost BYOK only: ARN of an AWS Secrets Manager secret in your own AWS account that " +
-					"holds every credential field of auth.method (secret and non-secret) as one JSON object. " +
-					"Relyance stores only this ARN; the InHost scanner reads the secret at scan time, so its " +
-					"IAM role needs secretsmanager:GetSecretValue on it. Requires runtime_mode = IN_HOST_BYOK " +
-					"(set in the Relyance app) and an auth block; with it, auth.secrets_wo must be unset and " +
-					"auth.params may hold only top-level fields such as data_storage_location. Removing it " +
-					"clears the reference.",
-				Validators: []validator.String{
-					stringvalidator.RegexMatches(secretRefPattern, secretRefPatternMessage),
-				},
+				Description: "InHost BYOK only: ARN of an AWS Secrets Manager secret that holds every credential " +
+					"field of auth.method (secret and non-secret) as one JSON object. The secret must be in the AWS " +
+					"account of your InHost deployment (Outpost on AWS), and its region must be in the ARN's " +
+					"partition. Relyance stores only this ARN; the InHost scanner reads the secret at scan time, so " +
+					"its IAM role needs secretsmanager:GetSecretValue on it. Requires runtime_mode = IN_HOST_BYOK " +
+					"and an auth block; with it, auth.secrets_wo must be unset and auth.params may hold only " +
+					"top-level fields such as data_storage_location. Removing it clears the reference, and so " +
+					"does switching runtime_mode away from IN_HOST_BYOK.",
+				Validators: []validator.String{secretRefValidator{}},
 			},
 			"runtime_mode": schema.StringAttribute{
+				Optional: true,
 				Computed: true,
-				Description: "Where the connection's scanner runs and where its credentials live " +
-					"(RELYANCE_HOSTED, IN_HOST, IN_HOME or IN_HOST_BYOK). Set in the Relyance app; read-only here.",
+				Description: "Where the connection's scanner runs and where its credentials live: RELYANCE_HOSTED, " +
+					"IN_HOST, IN_HOST_BYOK or IN_HOME. The tenant needs an enabled deployment for the mode (InHost " +
+					"for IN_HOST and IN_HOST_BYOK, InHome for IN_HOME). When unset, Terraform does not manage it and " +
+					"reports the current value (new connections start as RELYANCE_HOSTED). Switching to IN_HOST_BYOK " +
+					"deletes any credentials Relyance holds for the connection; switching away from it clears secret_ref.",
+				Validators: []validator.String{stringvalidator.OneOf(client.RuntimeModes...)},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -254,6 +258,12 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
+	// runtime_mode goes first: it decides where the auth save stores values
+	// and whether secret_ref is accepted.
+	if !r.applyRuntimeMode(ctx, &plan, nil, &resp.Diagnostics) {
+		return
+	}
+
 	// Apply any non-name scalars the practitioner set (create only takes the
 	// name; the rest are PATCH semantics).
 	scalars, diags := plan.toScalarUpdate(ctx)
@@ -270,7 +280,7 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 
 	if plan.Auth != nil {
-		if !r.saveAuth(ctx, req.Config, &plan, secretRefWire(plan.SecretRef, nil), &resp.Diagnostics) {
+		if !r.saveAuth(ctx, req.Config, &plan, secretRefWire(plan.SecretRef, nil, plannedRuntimeMode(&plan, nil)), &resp.Diagnostics) {
 			return
 		}
 	}
@@ -335,6 +345,10 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 	}
 	plan.ID = state.ID
 
+	if !r.applyRuntimeMode(ctx, &plan, &state, &resp.Diagnostics) {
+		return
+	}
+
 	scalars, diags := plan.toScalarUpdate(ctx)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -356,7 +370,7 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 
 	// A secret_ref change rides on the auth save (the server takes it with
 	// the auth method); removing it from config sends "" to clear it.
-	secretRef := secretRefWire(plan.SecretRef, &state)
+	secretRef := secretRefWire(plan.SecretRef, &state, plannedRuntimeMode(&plan, &state))
 	if authChanged(plan.Auth, state.Auth) || secretRef != nil {
 		if !r.saveAuth(ctx, req.Config, &plan, secretRef, &resp.Diagnostics) {
 			return
@@ -459,30 +473,35 @@ func (r *connectionResource) ModifyPlan(ctx context.Context, req resource.Modify
 		}
 	}
 
-	// The server recomputes credentials_fingerprint / status / updated_at when the
-	// auth block changes; mark them unknown so UseStateForUnknown doesn't pin stale
-	// values through the update. Must stay ahead of the validate_on_plan gate below:
-	// skipping it leaves a known planned value that apply contradicts.
-	if plan.Auth != nil && state != nil &&
-		(authChanged(plan.Auth, state.Auth) || secretRefWire(plan.SecretRef, state) != nil) {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("credentials_fingerprint"), types.StringUnknown())...)
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("status"), types.StringUnknown())...)
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("updated_at"), types.StringUnknown())...)
-	}
-
-	// InHost BYOK rules that need only config and prior state (runtime_mode is
-	// refreshed into state before planning). Not gated on validate_on_plan: they
-	// cost no API call and the server rejects the same things at apply.
 	var cfg resourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	mode, modeKnown := targetRuntimeMode(cfg.RuntimeMode, state)
+
+	// The server recomputes credentials_fingerprint / status / updated_at when the
+	// auth block, secret_ref or runtime_mode changes (switching to BYOK deletes the
+	// Relyance-held secret); mark them unknown so UseStateForUnknown doesn't pin
+	// stale values through the update. Must stay ahead of the validate_on_plan gate
+	// below: skipping it leaves a known planned value that apply contradicts.
+	if plan.Auth != nil && state != nil &&
+		(authChanged(plan.Auth, state.Auth) || !plan.RuntimeMode.Equal(state.RuntimeMode) ||
+			secretRefWire(plan.SecretRef, state, mode) != nil) {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("credentials_fingerprint"), types.StringUnknown())...)
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("status"), types.StringUnknown())...)
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("updated_at"), types.StringUnknown())...)
+	}
+
+	// InHost BYOK rules against the runtime_mode the apply ends with (config, or
+	// the refreshed state when runtime_mode is not managed). Not gated on
+	// validate_on_plan: they cost no API call and the server rejects the same
+	// things at apply.
 	cfgSecrets := types.MapNull(types.StringType)
 	if cfg.Auth != nil {
 		cfgSecrets = cfg.Auth.SecretsWO
 	}
-	resp.Diagnostics.Append(byokPlanDiags(ctx, &plan, state, cfgSecrets)...)
+	resp.Diagnostics.Append(byokPlanDiags(ctx, &plan, mode, modeKnown, cfgSecrets)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -510,7 +529,7 @@ func (r *connectionResource) ModifyPlan(ctx context.Context, req resource.Modify
 	}
 
 	if plan.Auth != nil {
-		r.validateAuthPlan(ctx, req, resp, &plan, state, vendor)
+		r.validateAuthPlan(ctx, req, resp, &plan, modeKnown && mode == client.RuntimeModeInHostBYOK, vendor)
 	}
 }
 
@@ -533,10 +552,9 @@ func (r *connectionResource) validateAuthPlan(
 	req resource.ModifyPlanRequest,
 	resp *resource.ModifyPlanResponse,
 	plan *resourceModel,
-	state *resourceModel,
+	byok bool,
 	vendor *client.Vendor,
 ) {
-	byok := isBYOK(state)
 	authPath := path.Root("auth")
 	method := plan.Auth.Method
 	if method.IsNull() || method.IsUnknown() {
@@ -694,6 +712,12 @@ func (r *connectionResource) saveAuth(ctx context.Context, config tfsdk.Config, 
 	}
 	err := r.svc.SaveAuth(ctx, plan.Vendor.ValueString(), plan.ID.ValueString(), req)
 	if err != nil {
+		if secretRef != nil && *secretRef != "" && isUnprocessable(err) {
+			diags.AddAttributeError(path.Root("secret_ref"), "Relyance rejected secret_ref",
+				err.Error()+"\n\nsecret_ref must name a secret in the AWS account of the tenant's InHost "+
+					"deployment, and secret references are available only for Outpost on AWS.")
+			return false
+		}
 		diags.AddAttributeError(path.Root("auth"), "Saving connection credentials", err.Error())
 		return false
 	}
@@ -728,8 +752,52 @@ func (r *connectionResource) readBack(ctx context.Context, m *resourceModel) (ok
 	return true, ""
 }
 
+// plannedRuntimeMode is the runtime_mode after the apply: the planned value,
+// or on create (prior nil) the server default when it is not configured.
+func plannedRuntimeMode(plan, prior *resourceModel) string {
+	if knownString(plan.RuntimeMode) {
+		return plan.RuntimeMode.ValueString()
+	}
+	if prior == nil {
+		return client.RuntimeModeRelyanceHosted
+	}
+	return ""
+}
+
+// applyRuntimeMode PATCHes runtime_mode when the plan sets it to a value the
+// connection does not have yet (prior nil on create). Returns false on error.
+func (r *connectionResource) applyRuntimeMode(ctx context.Context, plan, prior *resourceModel, diags *diag.Diagnostics) bool {
+	if !knownString(plan.RuntimeMode) {
+		return true
+	}
+	want := plan.RuntimeMode.ValueString()
+	if prior == nil && want == client.RuntimeModeRelyanceHosted {
+		return true // new connections start there
+	}
+	if prior != nil && plan.RuntimeMode.Equal(prior.RuntimeMode) {
+		return true
+	}
+	err := r.svc.UpdateScalars(ctx, plan.Vendor.ValueString(), plan.ID.ValueString(), client.ScalarUpdateRequest{RuntimeMode: &want})
+	if err == nil {
+		return true
+	}
+	detail := err.Error()
+	if isUnprocessable(err) {
+		detail += fmt.Sprintf("\n\nThe tenant needs an enabled deployment for runtime_mode %q: an InHost "+
+			"deployment for IN_HOST and IN_HOST_BYOK, an InHome deployment for IN_HOME.", want)
+	}
+	diags.AddAttributeError(path.Root("runtime_mode"), "Setting runtime_mode", detail)
+	return false
+}
+
+// isUnprocessable reports an HTTP 422 from the API (a request the server
+// understood but rejected, e.g. a runtime mode the tenant cannot use).
+func isUnprocessable(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "HTTP 422")
+}
+
 func scalarsNonEmpty(s client.ScalarUpdateRequest) bool {
 	return s.ConnectionName != nil || s.RefreshFrequency != nil || s.StartScanFrom != nil ||
 		s.DataStorageLocation != nil || s.BusinessNodeIDs != nil || s.CredentialsExpireAt != nil ||
-		s.RelyanceSecretAccess != nil
+		s.RelyanceSecretAccess != nil || s.RuntimeMode != nil
 }

@@ -288,10 +288,11 @@ func (m *resourceModel) refreshFromAPI(ctx context.Context, d *client.Connection
 			m.SupportSecretAccess = types.BoolValue(v)
 		}
 	}
-	// runtime_mode is server-owned (set in the Relyance app) and always known
-	// after a read. secret_ref is always read back, set or not: it is the
-	// practitioner's to manage, so a reference added or removed outside
-	// Terraform shows as drift (and import picks it up).
+	// runtime_mode is always read back, so it is known after every read; when
+	// the practitioner does not set it, it reports the current value.
+	// secret_ref is always read back, set or not: it is the practitioner's to
+	// manage, so a reference added or removed outside Terraform shows as drift
+	// (and import picks it up).
 	m.RuntimeMode = types.StringValue(d.RuntimeMode())
 	if v, ok := d.SecretRef(); ok {
 		m.SecretRef = types.StringValue(v)

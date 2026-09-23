@@ -338,6 +338,7 @@ func TestUpdateConnectionScalarsAllFields(t *testing.T) {
 	loc := map[string]string{"region": "us"}
 	credsExpire := 1800000000.0
 	secretAccess := true
+	mode := RuntimeModeInHostBYOK
 	err := c.UpdateConnectionScalars(context.Background(), "aws_s3", "5", ScalarUpdateRequest{
 		ConnectionName:       &name,
 		RefreshFrequency:     &freq,
@@ -346,6 +347,7 @@ func TestUpdateConnectionScalarsAllFields(t *testing.T) {
 		BusinessNodeIDs:      []string{"a", "b"},
 		CredentialsExpireAt:  &credsExpire,
 		RelyanceSecretAccess: &secretAccess,
+		RuntimeMode:          &mode,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -362,6 +364,7 @@ func TestUpdateConnectionScalarsAllFields(t *testing.T) {
 		"businessNodeIds":      []any{"a", "b"},
 		"credentialsExpireAt":  1800000000.0,
 		"relyanceSecretAccess": true,
+		"runtimeMode":          "IN_HOST_BYOK",
 	}
 	gotJSON, _ := json.Marshal(body)
 	wantJSON, _ := json.Marshal(want)

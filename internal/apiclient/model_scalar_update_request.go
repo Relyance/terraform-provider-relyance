@@ -26,6 +26,7 @@ type ScalarUpdateRequest struct {
 	BusinessNodeIds      []string                    `json:"businessNodeIds,omitempty"`
 	CredentialsExpireAt  NullableInt64               `json:"credentialsExpireAt,omitempty"`
 	RelyanceSecretAccess NullableBool                `json:"relyanceSecretAccess,omitempty"`
+	RuntimeMode          NullableString              `json:"runtimeMode,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -339,6 +340,49 @@ func (o *ScalarUpdateRequest) UnsetRelyanceSecretAccess() {
 	o.RelyanceSecretAccess.Unset()
 }
 
+// GetRuntimeMode returns the RuntimeMode field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ScalarUpdateRequest) GetRuntimeMode() string {
+	if o == nil || IsNil(o.RuntimeMode.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.RuntimeMode.Get()
+}
+
+// GetRuntimeModeOk returns a tuple with the RuntimeMode field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *ScalarUpdateRequest) GetRuntimeModeOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.RuntimeMode.Get(), o.RuntimeMode.IsSet()
+}
+
+// HasRuntimeMode returns a boolean if a field has been set.
+func (o *ScalarUpdateRequest) HasRuntimeMode() bool {
+	if o != nil && o.RuntimeMode.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetRuntimeMode gets a reference to the given NullableString and assigns it to the RuntimeMode field.
+func (o *ScalarUpdateRequest) SetRuntimeMode(v string) {
+	o.RuntimeMode.Set(&v)
+}
+
+// SetRuntimeModeNil sets the value for RuntimeMode to be an explicit nil
+func (o *ScalarUpdateRequest) SetRuntimeModeNil() {
+	o.RuntimeMode.Set(nil)
+}
+
+// UnsetRuntimeMode ensures that no value is present for RuntimeMode, not even an explicit nil
+func (o *ScalarUpdateRequest) UnsetRuntimeMode() {
+	o.RuntimeMode.Unset()
+}
+
 func (o ScalarUpdateRequest) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -370,6 +414,9 @@ func (o ScalarUpdateRequest) ToMap() (map[string]interface{}, error) {
 	if o.RelyanceSecretAccess.IsSet() {
 		toSerialize["relyanceSecretAccess"] = o.RelyanceSecretAccess.Get()
 	}
+	if o.RuntimeMode.IsSet() {
+		toSerialize["runtimeMode"] = o.RuntimeMode.Get()
+	}
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -399,6 +446,7 @@ func (o *ScalarUpdateRequest) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "businessNodeIds")
 		delete(additionalProperties, "credentialsExpireAt")
 		delete(additionalProperties, "relyanceSecretAccess")
+		delete(additionalProperties, "runtimeMode")
 		o.AdditionalProperties = additionalProperties
 	}
 

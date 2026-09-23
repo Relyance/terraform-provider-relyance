@@ -22,6 +22,9 @@ type fakeService struct {
 	vendor       *client.Vendor
 	saveReqs     []client.AuthSaveRequest
 	validateReqs []client.AuthSaveRequest
+	scalarReqs   []client.ScalarUpdateRequest
+	scalarErr    error
+	saveErr      error
 }
 
 func (f *fakeService) Create(_ context.Context, vendorKey string, req client.CreateConnectionRequest) (string, error) {
@@ -37,9 +40,10 @@ func (f *fakeService) Get(_ context.Context, vendorKey, id string) (*client.Conn
 	return f.detail, nil
 }
 
-func (f *fakeService) UpdateScalars(_ context.Context, vendorKey, id string, _ client.ScalarUpdateRequest) error {
+func (f *fakeService) UpdateScalars(_ context.Context, vendorKey, id string, req client.ScalarUpdateRequest) error {
 	f.calls = append(f.calls, fmt.Sprintf("patch %s/%s", vendorKey, id))
-	return nil
+	f.scalarReqs = append(f.scalarReqs, req)
+	return f.scalarErr
 }
 
 func (f *fakeService) Delete(_ context.Context, vendorKey, id string) error {
@@ -50,7 +54,7 @@ func (f *fakeService) Delete(_ context.Context, vendorKey, id string) error {
 func (f *fakeService) SaveAuth(_ context.Context, vendorKey, id string, req client.AuthSaveRequest) error {
 	f.calls = append(f.calls, fmt.Sprintf("saveauth %s/%s %s", vendorKey, id, req.AuthKey))
 	f.saveReqs = append(f.saveReqs, req)
-	return nil
+	return f.saveErr
 }
 
 func (f *fakeService) ValidateAuth(_ context.Context, vendorKey, id string, req client.AuthSaveRequest) (*client.ValidateResult, error) {

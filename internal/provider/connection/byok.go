@@ -12,6 +12,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/relyance/terraform-provider-relyance/internal/client"
@@ -24,12 +25,58 @@ import (
 // auth fields (for example data_storage_location) are still sent to Relyance.
 
 // secretRefPattern is the server's accepted AWS Secrets Manager secret ARN
-// shape (aws, aws-us-gov and aws-cn partitions).
+// shape (aws, aws-us-gov and aws-cn partitions). Group 1 is the partition,
+// group 2 the region.
 var secretRefPattern = regexp.MustCompile(
-	`^arn:aws(-us-gov|-cn)?:secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@-]+$`)
+	`^arn:(aws|aws-us-gov|aws-cn):secretsmanager:([a-z0-9-]+):\d{12}:secret:[A-Za-z0-9/_+=.@-]+$`)
 
 const secretRefPatternMessage = "must be an AWS Secrets Manager secret ARN, " +
 	"e.g. arn:aws:secretsmanager:us-east-1:123456789012:secret:relyance/inhost/jira-AbCdEf"
+
+// secretRefProblem returns why v is not an acceptable secret_ref ("" if it
+// is). It mirrors the server: the ARN shape, and a region that belongs to the
+// ARN's partition (aws-cn: cn-*, aws-us-gov: us-gov-*, aws: neither).
+func secretRefProblem(v string) string {
+	m := secretRefPattern.FindStringSubmatch(v)
+	if m == nil {
+		return secretRefPatternMessage
+	}
+	partition, region := m[1], m[2]
+	var ok bool
+	switch partition {
+	case "aws-cn":
+		ok = strings.HasPrefix(region, "cn-")
+	case "aws-us-gov":
+		ok = strings.HasPrefix(region, "us-gov-")
+	default:
+		ok = !strings.HasPrefix(region, "cn-") && !strings.HasPrefix(region, "us-gov-")
+	}
+	if !ok {
+		return fmt.Sprintf("The region %s is not in the AWS partition %s.", region, partition)
+	}
+	return ""
+}
+
+// secretRefValidator is the plan-time secret_ref check (secretRefProblem).
+type secretRefValidator struct{}
+
+func (secretRefValidator) Description(context.Context) string {
+	return "value must be an AWS Secrets Manager secret ARN whose region is in the ARN's partition"
+}
+
+func (v secretRefValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (secretRefValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if !knownString(req.ConfigValue) {
+		return
+	}
+	if problem := secretRefProblem(req.ConfigValue.ValueString()); problem != "" {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid secret_ref",
+			fmt.Sprintf("%q: %s", req.ConfigValue.ValueString(), problem))
+	}
+}
 
 // byokCredentialsHint tells the practitioner where BYOK credentials go.
 const byokCredentialsHint = "Relyance never receives the credentials of an InHost BYOK connection. " +
@@ -37,15 +84,26 @@ const byokCredentialsHint = "Relyance never receives the credentials of an InHos
 	"AWS Secrets Manager secret that secret_ref points to (or in the Kubernetes secret of your InHost " +
 	"deployment). Only top-level fields, such as data_storage_location, go in auth.params."
 
-func knownString(v types.String) bool { return !v.IsNull() && !v.IsUnknown() }
-
-// isBYOK reports whether the prior state says the connection runs as InHost
-// BYOK. Terraform refreshes state before planning, so this is the server's
-// current runtime_mode (runtime_mode is set in the Relyance app, not here).
-func isBYOK(state *resourceModel) bool {
-	return state != nil && knownString(state.RuntimeMode) &&
-		state.RuntimeMode.ValueString() == client.RuntimeModeInHostBYOK
+// targetRuntimeMode is the runtime_mode the connection will have after the
+// apply: the configured value; else the current one (runtime_mode is not
+// managed when unset); else, on create, the server default. known is false
+// when the configured value is not known yet.
+func targetRuntimeMode(cfgMode types.String, state *resourceModel) (mode string, known bool) {
+	switch {
+	case cfgMode.IsUnknown():
+		return "", false
+	case !cfgMode.IsNull():
+		return cfgMode.ValueString(), true
+	case state == nil:
+		return client.RuntimeModeRelyanceHosted, true
+	case knownString(state.RuntimeMode):
+		return state.RuntimeMode.ValueString(), true
+	default:
+		return "", false
+	}
 }
+
+func knownString(v types.String) bool { return !v.IsNull() && !v.IsUnknown() }
 
 // validateSecretRefConfig holds the config-only secret_ref rules (no state, no
 // network): a reference needs an auth method to attach to, and it cannot be
@@ -54,6 +112,11 @@ func validateSecretRefConfig(ctx context.Context, cfg *resourceModel) diag.Diagn
 	var diags diag.Diagnostics
 	if !knownString(cfg.SecretRef) {
 		return diags
+	}
+	if knownString(cfg.RuntimeMode) && cfg.RuntimeMode.ValueString() != client.RuntimeModeInHostBYOK {
+		diags.AddAttributeError(path.Root("secret_ref"), "secret_ref needs runtime_mode IN_HOST_BYOK",
+			fmt.Sprintf("secret_ref is only for InHost BYOK connections, but runtime_mode is %q. "+
+				"Set runtime_mode = %q, or remove secret_ref.", cfg.RuntimeMode.ValueString(), client.RuntimeModeInHostBYOK))
 	}
 	if cfg.Auth == nil {
 		diags.AddAttributeError(path.Root("secret_ref"), "secret_ref needs an auth block",
@@ -69,31 +132,22 @@ func validateSecretRefConfig(ctx context.Context, cfg *resourceModel) diag.Diagn
 	return diags
 }
 
-// byokPlanDiags holds the plan-time rules that need the prior state but no
-// network. state is nil on create. cfgSecrets is auth.secrets_wo from CONFIG
-// (write-only values are never in the plan).
-func byokPlanDiags(ctx context.Context, plan, state *resourceModel, cfgSecrets types.Map) diag.Diagnostics {
+// byokPlanDiags holds the plan-time rules that need no network. mode/known
+// is targetRuntimeMode. cfgSecrets is auth.secrets_wo from CONFIG (write-only
+// values are never in the plan).
+func byokPlanDiags(ctx context.Context, plan *resourceModel, mode string, known bool, cfgSecrets types.Map) diag.Diagnostics {
 	var diags diag.Diagnostics
-
-	// Unknown counts as set: the ARN of a secret created in the same apply is
-	// unknown at plan time, and it must not slip past these checks.
-	if !plan.SecretRef.IsNull() {
-		switch {
-		case state == nil:
-			diags.AddAttributeError(path.Root("secret_ref"), "secret_ref needs an InHost BYOK connection",
-				"secret_ref can only be set on a connection whose runtime_mode is IN_HOST_BYOK. A new "+
-					"connection starts as RELYANCE_HOSTED, and the runtime mode is set in the Relyance app. "+
-					"Create the connection without secret_ref, switch it to InHost BYOK in the Relyance app, "+
-					"then add secret_ref. Or import an existing InHost BYOK connection.")
-		case knownString(state.RuntimeMode) && !isBYOK(state):
-			diags.AddAttributeError(path.Root("secret_ref"), "secret_ref needs an InHost BYOK connection",
-				fmt.Sprintf("secret_ref requires runtime_mode = %q, but this connection's runtime_mode is %q. "+
-					"Switch the connection to InHost BYOK in the Relyance app, or remove secret_ref.",
-					client.RuntimeModeInHostBYOK, state.RuntimeMode.ValueString()))
-		}
+	if !known {
+		return diags
 	}
-
-	if isBYOK(state) && plan.Auth != nil {
+	// Unknown counts as set: the ARN of a secret created in the same apply is
+	// unknown at plan time, and it must not slip past this check.
+	if !plan.SecretRef.IsNull() && mode != client.RuntimeModeInHostBYOK {
+		diags.AddAttributeError(path.Root("secret_ref"), "secret_ref needs runtime_mode IN_HOST_BYOK",
+			fmt.Sprintf("secret_ref is only for InHost BYOK connections, but this connection's runtime_mode "+
+				"will be %q. Set runtime_mode = %q, or remove secret_ref.", mode, client.RuntimeModeInHostBYOK))
+	}
+	if mode == client.RuntimeModeInHostBYOK && plan.Auth != nil {
 		if keys := mapKeys(ctx, cfgSecrets, &diags); len(keys) > 0 {
 			diags.AddAttributeError(path.Root("auth").AtName("secrets_wo"), "Credentials on an InHost BYOK connection",
 				fmt.Sprintf("auth.secrets_wo sets %s. %s Remove auth.secrets_wo.", quoteJoin(keys), byokCredentialsHint))
@@ -129,9 +183,12 @@ func byokParamDiags(params map[string]string, matched *client.AuthConfig, vendor
 }
 
 // secretRefWire is the secret_ref value to send on an auth save: nil leaves
-// the stored reference unchanged, "" clears it, anything else sets it.
-func secretRefWire(plan types.String, state *resourceModel) *string {
-	if plan.IsUnknown() {
+// the stored reference unchanged, "" clears it, anything else sets it. mode is
+// the runtime_mode after the apply: off BYOK nothing is sent, because the
+// server clears secret_ref itself when the mode switches away from BYOK (and
+// rejects secretRef on any other mode).
+func secretRefWire(plan types.String, state *resourceModel, mode string) *string {
+	if plan.IsUnknown() || mode != client.RuntimeModeInHostBYOK {
 		return nil
 	}
 	prior := types.StringNull()

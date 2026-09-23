@@ -5,6 +5,7 @@ package connection
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -41,8 +42,8 @@ func TestSecretRefSchema(t *testing.T) {
 		t.Fatalf("secret_ref must be Optional, not Computed/Sensitive/Required: %+v", s.Attributes["secret_ref"])
 	}
 	mode, ok := s.Attributes["runtime_mode"].(schema.StringAttribute)
-	if !ok || !mode.Computed || mode.Optional || mode.Required {
-		t.Fatalf("runtime_mode must be Computed only: %+v", s.Attributes["runtime_mode"])
+	if !ok || !mode.Computed || !mode.Optional || mode.Required || len(mode.Validators) != 1 {
+		t.Fatalf("runtime_mode must be Optional+Computed with a OneOf validator: %+v", s.Attributes["runtime_mode"])
 	}
 }
 
@@ -71,6 +72,12 @@ func TestSecretRefValidator(t *testing.T) {
 		{" " + testARN, false}, // leading space
 		{"arn:aws:secretsmanager:US-EAST-1:123456789012:secret:x", false},          // region case
 		{"arn:aws:secretsmanager:us-east-1:123456789012:secret:x#fragment", false}, // bad char
+		{"arn:aws:secretsmanager:cn-north-1:123456789012:secret:x", false},         // aws + China region
+		{"arn:aws:secretsmanager:us-gov-west-1:123456789012:secret:x", false},      // aws + GovCloud region
+		{"arn:aws-cn:secretsmanager:us-east-1:123456789012:secret:x", false},       // aws-cn + commercial region
+		{"arn:aws-us-gov:secretsmanager:us-east-1:123456789012:secret:x", false},   // aws-us-gov + commercial region
+		{"arn:aws-cn:secretsmanager:cn-northwest-1:123456789012:secret:x", true},
+		{"arn:aws-us-gov:secretsmanager:us-gov-east-1:123456789012:secret:x", true},
 	}
 	for _, tc := range cases {
 		req := validator.StringRequest{Path: path.Root("secret_ref"), ConfigValue: types.StringValue(tc.in)}
@@ -163,44 +170,60 @@ func byokState(mode string, ref types.String) *resourceModel {
 	return &resourceModel{RuntimeMode: types.StringValue(mode), SecretRef: ref}
 }
 
+func TestTargetRuntimeMode(t *testing.T) {
+	byok, hosted := client.RuntimeModeInHostBYOK, client.RuntimeModeRelyanceHosted
+	cases := []struct {
+		name      string
+		cfg       types.String
+		state     *resourceModel
+		wantMode  string
+		wantKnown bool
+	}{
+		{"configured wins over state", types.StringValue(byok), byokState(hosted, types.StringNull()), byok, true},
+		{"configured on create", types.StringValue(byok), nil, byok, true},
+		{"configured but not yet known", types.StringUnknown(), nil, "", false},
+		{"unmanaged: current value", types.StringNull(), byokState(byok, types.StringNull()), byok, true},
+		{"unmanaged on create: server default", types.StringNull(), nil, hosted, true},
+		{"unmanaged, state unknown", types.StringNull(), &resourceModel{RuntimeMode: types.StringNull()}, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mode, known := targetRuntimeMode(tc.cfg, tc.state)
+			if mode != tc.wantMode || known != tc.wantKnown {
+				t.Fatalf("got (%q, %v), want (%q, %v)", mode, known, tc.wantMode, tc.wantKnown)
+			}
+		})
+	}
+}
+
 func TestByokPlanDiags(t *testing.T) {
 	ctx := context.Background()
 	withAuth := &authModel{Method: types.StringValue("api-key")}
 	secrets := strMap(t, map[string]string{"API_KEY": "x"})
 	nullMap := types.MapNull(types.StringType)
+	byok, hosted := client.RuntimeModeInHostBYOK, client.RuntimeModeRelyanceHosted
 
 	cases := []struct {
 		name    string
 		plan    resourceModel
-		state   *resourceModel
+		mode    string
+		known   bool
 		secrets types.Map
 		errPath *path.Path
 	}{
-		{"create without secret_ref", resourceModel{SecretRef: types.StringNull()}, nil, nullMap, nil},
-		{"create with secret_ref", resourceModel{SecretRef: types.StringValue(testARN), Auth: withAuth}, nil, nullMap, ptr(path.Root("secret_ref"))},
-		{"create with not-yet-known secret_ref", resourceModel{SecretRef: types.StringUnknown(), Auth: withAuth}, nil, nullMap, ptr(path.Root("secret_ref"))},
-		{"hosted connection with not-yet-known secret_ref", resourceModel{SecretRef: types.StringUnknown(), Auth: withAuth},
-			byokState(client.RuntimeModeRelyanceHosted, types.StringNull()), nullMap, ptr(path.Root("secret_ref"))},
-		{"BYOK connection with not-yet-known secret_ref", resourceModel{SecretRef: types.StringUnknown(), Auth: withAuth},
-			byokState(client.RuntimeModeInHostBYOK, types.StringNull()), nullMap, nil},
-		{"hosted connection with secret_ref", resourceModel{SecretRef: types.StringValue(testARN), Auth: withAuth},
-			byokState(client.RuntimeModeRelyanceHosted, types.StringNull()), nullMap, ptr(path.Root("secret_ref"))},
-		{"in-host (not BYOK) connection with secret_ref", resourceModel{SecretRef: types.StringValue(testARN), Auth: withAuth},
-			byokState("IN_HOST", types.StringNull()), nullMap, ptr(path.Root("secret_ref"))},
-		{"BYOK connection with secret_ref", resourceModel{SecretRef: types.StringValue(testARN), Auth: withAuth},
-			byokState(client.RuntimeModeInHostBYOK, types.StringNull()), nullMap, nil},
-		{"unknown runtime_mode in state is not judged", resourceModel{SecretRef: types.StringValue(testARN), Auth: withAuth},
-			&resourceModel{RuntimeMode: types.StringNull(), SecretRef: types.StringNull()}, nullMap, nil},
-		{"BYOK with secrets_wo", resourceModel{SecretRef: types.StringNull(), Auth: withAuth},
-			byokState(client.RuntimeModeInHostBYOK, types.StringNull()), secrets, ptr(path.Root("auth").AtName("secrets_wo"))},
-		{"hosted with secrets_wo is unchanged behaviour", resourceModel{SecretRef: types.StringNull(), Auth: withAuth},
-			byokState(client.RuntimeModeRelyanceHosted, types.StringNull()), secrets, nil},
-		{"BYOK clearing secret_ref is allowed", resourceModel{SecretRef: types.StringNull(), Auth: withAuth},
-			byokState(client.RuntimeModeInHostBYOK, types.StringValue(testARN)), nullMap, nil},
+		{"no secret_ref", resourceModel{SecretRef: types.StringNull()}, hosted, true, nullMap, nil},
+		{"secret_ref on BYOK", resourceModel{SecretRef: types.StringValue(testARN), Auth: withAuth}, byok, true, nullMap, nil},
+		{"not-yet-known secret_ref on BYOK", resourceModel{SecretRef: types.StringUnknown(), Auth: withAuth}, byok, true, nullMap, nil},
+		{"secret_ref on hosted", resourceModel{SecretRef: types.StringValue(testARN), Auth: withAuth}, hosted, true, nullMap, ptr(path.Root("secret_ref"))},
+		{"not-yet-known secret_ref on hosted", resourceModel{SecretRef: types.StringUnknown(), Auth: withAuth}, hosted, true, nullMap, ptr(path.Root("secret_ref"))},
+		{"secret_ref on IN_HOST", resourceModel{SecretRef: types.StringValue(testARN), Auth: withAuth}, client.RuntimeModeInHost, true, nullMap, ptr(path.Root("secret_ref"))},
+		{"unknown mode is not judged", resourceModel{SecretRef: types.StringValue(testARN), Auth: withAuth}, "", false, secrets, nil},
+		{"BYOK with secrets_wo", resourceModel{SecretRef: types.StringNull(), Auth: withAuth}, byok, true, secrets, ptr(path.Root("auth").AtName("secrets_wo"))},
+		{"hosted with secrets_wo is unchanged behaviour", resourceModel{SecretRef: types.StringNull(), Auth: withAuth}, hosted, true, secrets, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			diags := byokPlanDiags(ctx, &tc.plan, tc.state, tc.secrets)
+			diags := byokPlanDiags(ctx, &tc.plan, tc.mode, tc.known, tc.secrets)
 			if tc.errPath == nil {
 				if diags.HasError() {
 					t.Fatalf("unexpected: %v", diags)
@@ -252,17 +275,28 @@ func TestSecretRefWire(t *testing.T) {
 		{"changed sends new", types.StringValue(other), byokState(client.RuntimeModeInHostBYOK, types.StringValue(testARN)), ptr(other)},
 		{"added sends new", types.StringValue(testARN), byokState(client.RuntimeModeInHostBYOK, types.StringNull()), ptr(testARN)},
 		{"removed sends empty (clear)", types.StringNull(), byokState(client.RuntimeModeInHostBYOK, types.StringValue(testARN)), ptr("")},
-		{"never set sends nothing", types.StringNull(), byokState(client.RuntimeModeRelyanceHosted, types.StringNull()), nil},
+		{"never set sends nothing", types.StringNull(), byokState(client.RuntimeModeInHostBYOK, types.StringNull()), nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := secretRefWire(tc.plan, tc.state)
+			got := secretRefWire(tc.plan, tc.state, client.RuntimeModeInHostBYOK)
 			switch {
 			case got == nil && tc.want == nil:
 			case got == nil || tc.want == nil || *got != *tc.want:
 				t.Fatalf("got %v, want %v", deref(got), deref(tc.want))
 			}
 		})
+	}
+}
+
+func TestSecretRefWireOffBYOKSendsNothing(t *testing.T) {
+	// Switching away from BYOK: the server clears secret_ref itself and rejects
+	// secretRef on other modes, so nothing is sent.
+	state := byokState(client.RuntimeModeInHostBYOK, types.StringValue(testARN))
+	for _, mode := range []string{client.RuntimeModeRelyanceHosted, client.RuntimeModeInHost, client.RuntimeModeInHome, ""} {
+		if got := secretRefWire(types.StringNull(), state, mode); got != nil {
+			t.Fatalf("mode %q: got %q, want nil", mode, *got)
+		}
 	}
 }
 
@@ -477,6 +511,33 @@ func TestModifyPlanWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("create with runtime_mode BYOK and secret_ref is allowed", func(t *testing.T) {
+		v := h.obj(map[string]tftypes.Value{"auth": h.authVal(nil, nil), "secret_ref": str(testARN), "runtime_mode": str(client.RuntimeModeInHostBYOK)})
+		resp := h.modifyPlan(&connectionResource{}, v, v, tftypes.NewValue(h.root, nil))
+		if resp.Diagnostics.HasError() {
+			t.Fatal(resp.Diagnostics)
+		}
+	})
+
+	t.Run("create with runtime_mode BYOK rejects secrets_wo", func(t *testing.T) {
+		cfg := h.obj(map[string]tftypes.Value{"auth": h.authVal(nil, map[string]string{"API_KEY": "x"}), "runtime_mode": str(client.RuntimeModeInHostBYOK)})
+		plan := h.obj(map[string]tftypes.Value{"auth": h.authVal(nil, nil), "runtime_mode": str(client.RuntimeModeInHostBYOK)})
+		resp := h.modifyPlan(&connectionResource{}, cfg, plan, tftypes.NewValue(h.root, nil))
+		if !hasErrorAt(resp.Diagnostics, path.Root("auth").AtName("secrets_wo")) {
+			t.Fatalf("diags = %v", resp.Diagnostics)
+		}
+	})
+
+	t.Run("switching away from BYOK with secret_ref still set errors", func(t *testing.T) {
+		state := h.obj(h.stateVals(client.RuntimeModeInHostBYOK, ptr(testARN), true))
+		planVals := h.stateVals(client.RuntimeModeRelyanceHosted, ptr(testARN), true)
+		cfg := h.obj(map[string]tftypes.Value{"auth": h.authVal(nil, nil), "secret_ref": str(testARN), "runtime_mode": str(client.RuntimeModeRelyanceHosted)})
+		resp := h.modifyPlan(&connectionResource{}, cfg, h.obj(planVals), state)
+		if !hasErrorAt(resp.Diagnostics, path.Root("secret_ref")) {
+			t.Fatalf("diags = %v", resp.Diagnostics)
+		}
+	})
+
 	t.Run("hosted connection with secret_ref errors", func(t *testing.T) {
 		state := h.obj(h.stateVals(client.RuntimeModeRelyanceHosted, nil, true))
 		vals := h.stateVals(client.RuntimeModeRelyanceHosted, ptr(testARN), true)
@@ -616,6 +677,148 @@ func TestUpdateHostedConnectionSendsNoSecretRef(t *testing.T) {
 	}
 	if len(f.saveReqs) != 0 {
 		t.Fatalf("a rename must not save auth: %+v", f.saveReqs)
+	}
+}
+
+// createHarness runs Create for a config and returns the fake's calls.
+func runCreate(t *testing.T, h *tfHarness, f *fakeService, cfgVals map[string]tftypes.Value) *resource.CreateResponse {
+	t.Helper()
+	cfg := h.obj(cfgVals)
+	planVals := map[string]tftypes.Value{}
+	for k, v := range cfgVals {
+		planVals[k] = v
+	}
+	planVals["id"] = tftypes.NewValue(tftypes.String, tftypes.UnknownValue)
+	if _, ok := cfgVals["runtime_mode"]; !ok {
+		planVals["runtime_mode"] = tftypes.NewValue(tftypes.String, tftypes.UnknownValue)
+	}
+	req := resource.CreateRequest{
+		Config: tfsdk.Config{Schema: h.schema, Raw: cfg},
+		Plan:   tfsdk.Plan{Schema: h.schema, Raw: h.obj(planVals)},
+	}
+	resp := &resource.CreateResponse{State: tfsdk.State{Schema: h.schema, Raw: tftypes.NewValue(h.root, nil)}}
+	(&connectionResource{svc: f}).Create(context.Background(), req, resp)
+	return resp
+}
+
+func TestCreateBYOKInOneApply(t *testing.T) {
+	h := newHarness(t)
+	f := &fakeService{created: "7", detail: &client.ConnectionDetail{Connection: map[string]any{
+		"connection_name": "Jira", "integrationType": "INTEGRATION_TYPE_VENDOR", "runtime_mode": "IN_HOST_BYOK",
+		"auth": map[string]any{"type": "AUTH_TYPE_API_KEY", "status": "AUTH_STATUS_CONNECTED", "secret_ref": testARN},
+	}}}
+	resp := runCreate(t, h, f, map[string]tftypes.Value{
+		"auth":         h.authVal(map[string]string{"data_storage_location": "us"}, nil),
+		"runtime_mode": str(client.RuntimeModeInHostBYOK),
+		"secret_ref":   str(testARN),
+	})
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	// Order: create, runtime_mode PATCH, auth save (with secretRef), read-back.
+	want := []string{"create atlassian_jira Jira", "patch atlassian_jira/7", "saveauth atlassian_jira/7 api-key", "get atlassian_jira/7"}
+	if strings.Join(f.calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("calls = %v, want %v", f.calls, want)
+	}
+	if m := f.scalarReqs[0].RuntimeMode; m == nil || *m != client.RuntimeModeInHostBYOK || f.scalarReqs[0].ConnectionName != nil {
+		t.Fatalf("runtime PATCH = %+v", f.scalarReqs[0])
+	}
+	if r := f.saveReqs[0].SecretRef; r == nil || *r != testARN {
+		t.Fatalf("save req = %+v", f.saveReqs[0])
+	}
+	var mode, ref types.String
+	resp.State.GetAttribute(context.Background(), path.Root("runtime_mode"), &mode)
+	resp.State.GetAttribute(context.Background(), path.Root("secret_ref"), &ref)
+	if mode.ValueString() != client.RuntimeModeInHostBYOK || ref.ValueString() != testARN {
+		t.Fatalf("state runtime_mode=%v secret_ref=%v", mode, ref)
+	}
+}
+
+func TestCreateWithoutRuntimeModeSendsNoRuntimePatch(t *testing.T) {
+	h := newHarness(t)
+	f := &fakeService{created: "7", detail: &client.ConnectionDetail{Connection: map[string]any{
+		"connection_name": "Jira", "integrationType": "INTEGRATION_TYPE_VENDOR",
+	}}}
+	resp := runCreate(t, h, f, map[string]tftypes.Value{})
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	if len(f.scalarReqs) != 0 {
+		t.Fatalf("unexpected PATCH: %+v", f.scalarReqs)
+	}
+	var mode types.String
+	resp.State.GetAttribute(context.Background(), path.Root("runtime_mode"), &mode)
+	if mode.ValueString() != client.RuntimeModeRelyanceHosted {
+		t.Fatalf("runtime_mode = %v", mode)
+	}
+}
+
+func TestRuntimeMode422IsAClearDiagnostic(t *testing.T) {
+	h := newHarness(t)
+	f := &fakeService{created: "7", scalarErr: fmt.Errorf("PATCH /x -> HTTP 422 Unprocessable Entity: tenant has no InHost deployment")}
+	resp := runCreate(t, h, f, map[string]tftypes.Value{"runtime_mode": str(client.RuntimeModeInHostBYOK)})
+	if !hasErrorAt(resp.Diagnostics, path.Root("runtime_mode")) {
+		t.Fatalf("diags = %v", resp.Diagnostics)
+	}
+	d := resp.Diagnostics.Errors()[0].Detail()
+	if !strings.Contains(d, "no InHost deployment") || !strings.Contains(d, "enabled deployment") {
+		t.Fatalf("detail = %s", d)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "saveauth") {
+			t.Fatal("auth must not be saved after a failed runtime_mode PATCH")
+		}
+	}
+}
+
+func TestSecretRef422IsAClearDiagnostic(t *testing.T) {
+	f := &fakeService{saveErr: fmt.Errorf("PUT /x -> HTTP 422 Unprocessable Entity: Secret references are available only for Outpost on AWS.")}
+	r := &connectionResource{svc: f}
+	plan := &resourceModel{Vendor: types.StringValue("atlassian_jira"), ID: types.StringValue("3"),
+		Auth: &authModel{Method: types.StringValue("api-key"), Params: types.MapNull(types.StringType)}}
+	h := newHarness(t)
+	cfg := tfsdk.Config{Schema: h.schema, Raw: h.obj(map[string]tftypes.Value{"auth": h.authVal(nil, nil)})}
+	var diags diag.Diagnostics
+	if r.saveAuth(context.Background(), cfg, plan, ptr(testARN), &diags) {
+		t.Fatal("expected failure")
+	}
+	if !hasErrorAt(diags, path.Root("secret_ref")) || !strings.Contains(diags.Errors()[0].Detail(), "Outpost on AWS") {
+		t.Fatalf("diags = %v", diags)
+	}
+}
+
+func TestUpdateSwitchAwayFromBYOK(t *testing.T) {
+	h := newHarness(t)
+	f := &fakeService{detail: &client.ConnectionDetail{Connection: map[string]any{
+		"connection_name": "Jira", "integrationType": "INTEGRATION_TYPE_VENDOR", "runtime_mode": "RELYANCE_HOSTED",
+		"auth": map[string]any{"type": "AUTH_TYPE_API_KEY"},
+	}}}
+	r := &connectionResource{svc: f}
+	state := h.obj(h.stateVals(client.RuntimeModeInHostBYOK, ptr(testARN), true))
+	plan := h.obj(h.stateVals(client.RuntimeModeRelyanceHosted, nil, true))
+	cfg := h.obj(map[string]tftypes.Value{"auth": h.authVal(nil, nil), "runtime_mode": str(client.RuntimeModeRelyanceHosted)})
+	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: h.schema, Raw: cfg},
+		Plan:   tfsdk.Plan{Schema: h.schema, Raw: plan},
+		State:  tfsdk.State{Schema: h.schema, Raw: state},
+	}
+	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: h.schema, Raw: state}}
+	r.Update(context.Background(), req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(resp.Diagnostics)
+	}
+	// First PATCH is runtime_mode alone; the usual scalar PATCH follows.
+	if len(f.scalarReqs) == 0 || f.scalarReqs[0].RuntimeMode == nil || *f.scalarReqs[0].RuntimeMode != client.RuntimeModeRelyanceHosted ||
+		f.scalarReqs[0].ConnectionName != nil {
+		t.Fatalf("PATCH reqs = %+v", f.scalarReqs)
+	}
+	for _, r := range f.scalarReqs[1:] {
+		if r.RuntimeMode != nil {
+			t.Fatalf("runtime_mode sent twice: %+v", f.scalarReqs)
+		}
+	}
+	if len(f.saveReqs) != 0 {
+		t.Fatalf("no auth save expected (the server clears secret_ref): %+v", f.saveReqs)
 	}
 }
 

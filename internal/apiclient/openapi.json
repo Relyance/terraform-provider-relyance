@@ -752,7 +752,7 @@
       "patch": {
         "operationId": "update_vendor_connection_v1",
         "summary": "Update scalar sub-doc fields on a connection.",
-        "description": "Updates one or more scalar sub-doc fields on an existing connection\n(`refreshFrequency`, `startScanFrom`, `dataStorageLocation`, `businessNodeIds`,\n`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`). Only fields present in\nthe request body are written, via a dotted-path `$set` -- never a whole-document replace.\n\nWhen the write includes `refreshFrequency` and/or `startScanFrom`, a best-effort \"conductor\npoke\" is scheduled off the request path afterward (mirrors mgr's\n`connSetRefreshFrequency`/`connSetStartScanFrom`) so the scan scheduler picks up the new\ncadence without waiting for a restart. The poke never blocks or fails the response --\nscheduling or publishing it is not on the request's critical path.\n\nReturns 204 with no body, including when the request body has no recognized fields to write\n(a no-op). Poll `GET .../{connection_id}` to observe the updated resource.",
+        "description": "Updates one or more scalar sub-doc fields on an existing connection\n(`refreshFrequency`, `startScanFrom`, `dataStorageLocation`, `businessNodeIds`,\n`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`, `runtimeMode`). Only fields\npresent in the request body are written, via dotted-path `$set`/`$unset` in one update --\nnever a whole-document replace.\n\n`runtimeMode` (mirrors mgr's `updateIntegrationConnectionRuntimeMode`): the tenant must have a\ndeployment for the mode, as mgr's `getSupportedIntegrationConnectionRuntimeModes` decides --\n`IN_HOST`/`IN_HOST_BYOK` need an enabled InHost (`sierra_configuration`), `IN_HOME` an enabled\nInHome (`molokai_configuration`); otherwise 422 and nothing is written. Switching to\n`IN_HOST_BYOK` drops `auth.secret_path` in the same write and then deletes that Relyance-held\nSecret Manager secret (3 attempts): BYOK credentials live only in the customer's environment. If\nthe deletion still fails, the mode change stays committed (204), the secret's path is recorded in\n`auth.pending_secret_deletion`, and the next runtime-mode change retries it (and clears the field).\nSwitching to any other mode clears `auth.secret_ref`, which only means something for\n`IN_HOST_BYOK`.\n\nWhen the write includes `refreshFrequency` and/or `startScanFrom`, a best-effort \"conductor\npoke\" is scheduled off the request path afterward (mirrors mgr's\n`connSetRefreshFrequency`/`connSetStartScanFrom`) so the scan scheduler picks up the new\ncadence without waiting for a restart. The poke never blocks or fails the response --\nscheduling or publishing it is not on the request's critical path.\n\nReturns 204 with no body, including when the request body has no recognized fields to write\n(a no-op). Poll `GET .../{connection_id}` to observe the updated resource.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -998,7 +998,7 @@
       "post": {
         "operationId": "validate_vendor_connection_auth_v1",
         "summary": "Validate auth-field values without persisting them.",
-        "description": "Validates a set of auth-field values against the vendor's auth form without persisting\nanything (`Field.fill()` + `validate()`).\n\nWhen the connection's `runtime_mode` is `IN_HOST_BYOK`, every credential field of the auth\nmethod lives in the customer's own secret, so only `is_top_level` fields (e.g.\n`data_storage_location`) are validated. The result is invalid when a secret field carries a\nvalue (the error names the keys, never the values), when `secretRef` is not an AWS Secrets\nManager ARN or is in an AWS account other than the tenant's InHost deployment (when that account\nis known), or when an app-token (browser sign-in) auth method is combined with a secret\nreference. Relyance does not test access to the customer's secret. On any other runtime mode a\nnon-empty `secretRef` is invalid.",
+        "description": "Validates a set of auth-field values against the vendor's auth form without persisting\nanything (`Field.fill()` + `validate()`).\n\nWhen the connection's `runtime_mode` is `IN_HOST_BYOK`, every credential field of the auth\nmethod lives in the customer's own secret, so only `is_top_level` fields (e.g.\n`data_storage_location`) are validated. The result is invalid when a secret field carries a\nvalue (the error names the keys, never the values), when `secretRef` breaks a secret-reference\nrule (see `PUT .../auth`), or when an app-token (browser sign-in) auth method is combined with a\nsecret reference. 500 when the InHost deployment cannot be read to check the reference. Relyance does not test access to the customer's secret. On any other runtime mode a\nnon-empty `secretRef` is invalid.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -1134,7 +1134,7 @@
       "put": {
         "operationId": "save_vendor_connection_auth_v1",
         "summary": "Save auth-field values (is_top_level split; secrets to GCP Secret Manager).",
-        "description": "Saves auth-field values for a connection. Fields flagged `is_top_level` on the vendor's\nauth form are written as flat scalars on the connection sub-doc; every other field is\nstored as a GCP Secret Manager secret.\n\n`IN_HOST_BYOK` connections never have server-side secrets: every credential field of the auth\nmethod (secret and non-secret) lives in the customer's environment -- a Kubernetes secret, or\nthe AWS Secrets Manager secret named by `secretRef`. Only `is_top_level` values, `auth.type`\nand `auth.secret_ref` are stored; other non-secret values are ignored. `secretRef`: omitted or\nnull keeps the stored value, an empty string clears it, anything else must be an AWS Secrets\nManager ARN (`arn:aws:secretsmanager:<region>:<account-id>:secret:<name>`) in the tenant's InHost\nAWS account when that account is known. 422 (nothing written) when a secret field carries a\nvalue (the error names the keys, never the values), when `secretRef` is invalid, or when an\napp-token (browser sign-in) auth method would be used with a secret reference. A non-empty\n`secretRef` on any other runtime mode is 422.\n\nFor `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the\n`auth.secret_path` built against) the tenant's own GCP project rather than the service's\ndefault project. Every save also sets `auth.updated_at` (epoch seconds); when secret fields\nwere saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 digest of the\nsaved secret fields only, letting a future Terraform provider detect credential drift\nwithout ever reading a secret value back.\n\nReturns 204 with no body.",
+        "description": "Saves auth-field values for a connection. Fields flagged `is_top_level` on the vendor's\nauth form are written as flat scalars on the connection sub-doc; every other field is\nstored as a GCP Secret Manager secret.\n\n`IN_HOST_BYOK` connections never have server-side secrets: every credential field of the auth\nmethod (secret and non-secret) lives in the customer's environment -- a Kubernetes secret, or\nthe AWS Secrets Manager secret named by `secretRef`. Only `is_top_level` values, `auth.type`\nand `auth.secret_ref` are stored; other non-secret values are ignored. `secretRef`: omitted or\nnull keeps the stored value, an empty string clears it, anything else must be an AWS Secrets\nManager ARN (`arn:<partition>:secretsmanager:<region>:<account-id>:secret:<name>`, region inside\nthe partition) whose (partition, account) is the tenant's InHost (Outpost) deployment on AWS. It\nis rejected when the tenant has no enabled InHost deployment or it is on GCP (\"Secret references\nare available only for Outpost on AWS.\"), and when the deployment's AWS account is unknown; a\nfailure to read the deployment is 500 (fail closed). 422 (nothing written) when a secret field\ncarries a value (the error names the keys, never the values), when `secretRef` is invalid, when\nan app-token (browser sign-in) auth method would be used with a secret reference, or when a\nrequired `is_top_level` field has no value (submitted, or already stored on the connection). A\nnon-empty `secretRef` on any other runtime mode is 422.\n\nFor `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the\n`auth.secret_path` built against) the tenant's own GCP project rather than the service's\ndefault project. Every save also sets `auth.updated_at` (epoch seconds); when secret fields\nwere saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 digest of the\nsaved secret fields only, letting a future Terraform provider detect credential drift\nwithout ever reading a secret value back.\n\nReturns 204 with no body.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -2426,6 +2426,24 @@
               }
             ],
             "title": "Relyancesecretaccess"
+          },
+          "runtimeMode": {
+            "description": "Where the connection runs and where its credentials live. The tenant must have a deployment for the mode (IN_HOST/IN_HOST_BYOK: an enabled InHost configuration; IN_HOME: an enabled InHome configuration), else 422. Switching to IN_HOST_BYOK drops auth.secret_path and deletes the Relyance-held secret; switching to any other mode clears auth.secret_ref.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "RELYANCE_HOSTED",
+                  "IN_HOST",
+                  "IN_HOST_BYOK",
+                  "IN_HOME"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtimemode"
           }
         },
         "additionalProperties": false,

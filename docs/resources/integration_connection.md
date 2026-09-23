@@ -66,15 +66,15 @@ resource "relyance_integration_connection" "s3" {
 - `data_storage_location` (Attributes) Where the vendor stores data (Relyance Location shape). Set the parts you know; unset parts are omitted. Values are the canonical Location strings used across ROPA/DSR. (see [below for nested schema](#nestedatt--data_storage_location))
 - `integration_type` (String) IntegrationType enum name (e.g. INTEGRATION_TYPE_VENDOR). Server default applies when omitted. Changing it forces a new connection.
 - `refresh_frequency_seconds` (Number) How often to rescan, in seconds.
+- `runtime_mode` (String) Where the connection's scanner runs and where its credentials live: RELYANCE_HOSTED, IN_HOST, IN_HOST_BYOK or IN_HOME. The tenant needs an enabled deployment for the mode (InHost for IN_HOST and IN_HOST_BYOK, InHome for IN_HOME). When unset, Terraform does not manage it and reports the current value (new connections start as RELYANCE_HOSTED). Switching to IN_HOST_BYOK deletes any credentials Relyance holds for the connection; switching away from it clears secret_ref.
 - `scan_from` (String) RFC3339 timestamp; scans consider data from this point forward (e.g. 2026-08-01T00:00:00Z).
 - `scans` (Attributes Map) Scan capabilities to enable on this connection, keyed by scan slug (e.g. data-inspection, assets-discovery — see the relyance_integration_vendor data source). (see [below for nested schema](#nestedatt--scans))
-- `secret_ref` (String) InHost BYOK only: ARN of an AWS Secrets Manager secret in your own AWS account that holds every credential field of auth.method (secret and non-secret) as one JSON object. Relyance stores only this ARN; the InHost scanner reads the secret at scan time, so its IAM role needs secretsmanager:GetSecretValue on it. Requires runtime_mode = IN_HOST_BYOK (set in the Relyance app) and an auth block; with it, auth.secrets_wo must be unset and auth.params may hold only top-level fields such as data_storage_location. Removing it clears the reference.
+- `secret_ref` (String) InHost BYOK only: ARN of an AWS Secrets Manager secret that holds every credential field of auth.method (secret and non-secret) as one JSON object. The secret must be in the AWS account of your InHost deployment (Outpost on AWS), and its region must be in the ARN's partition. Relyance stores only this ARN; the InHost scanner reads the secret at scan time, so its IAM role needs secretsmanager:GetSecretValue on it. Requires runtime_mode = IN_HOST_BYOK and an auth block; with it, auth.secrets_wo must be unset and auth.params may hold only top-level fields such as data_storage_location. Removing it clears the reference, and so does switching runtime_mode away from IN_HOST_BYOK.
 - `support_secret_access` (Boolean) Allow Relyance support to access stored secrets for troubleshooting.
 
 ### Read-Only
 
 - `id` (String) Server-allocated connection id, unique within the vendor.
-- `runtime_mode` (String) Where the connection's scanner runs and where its credentials live (RELYANCE_HOSTED, IN_HOST, IN_HOME or IN_HOST_BYOK). Set in the Relyance app; read-only here.
 
 <a id="nestedatt--auth"></a>
 ### Nested Schema for `auth`

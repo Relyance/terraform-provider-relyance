@@ -1231,11 +1231,15 @@ method (secret and non-secret) lives in the customer's environment -- a Kubernet
 the AWS Secrets Manager secret named by `secretRef`. Only `is_top_level` values, `auth.type`
 and `auth.secret_ref` are stored; other non-secret values are ignored. `secretRef`: omitted or
 null keeps the stored value, an empty string clears it, anything else must be an AWS Secrets
-Manager ARN (`arn:aws:secretsmanager:<region>:<account-id>:secret:<name>`) in the tenant's InHost
-AWS account when that account is known. 422 (nothing written) when a secret field carries a
-value (the error names the keys, never the values), when `secretRef` is invalid, or when an
-app-token (browser sign-in) auth method would be used with a secret reference. A non-empty
-`secretRef` on any other runtime mode is 422.
+Manager ARN (`arn:<partition>:secretsmanager:<region>:<account-id>:secret:<name>`, region inside
+the partition) whose (partition, account) is the tenant's InHost (Outpost) deployment on AWS. It
+is rejected when the tenant has no enabled InHost deployment or it is on GCP ("Secret references
+are available only for Outpost on AWS."), and when the deployment's AWS account is unknown; a
+failure to read the deployment is 500 (fail closed). 422 (nothing written) when a secret field
+carries a value (the error names the keys, never the values), when `secretRef` is invalid, when
+an app-token (browser sign-in) auth method would be used with a secret reference, or when a
+required `is_top_level` field has no value (submitted, or already stored on the connection). A
+non-empty `secretRef` on any other runtime mode is 422.
 
 For `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the
 `auth.secret_path` built against) the tenant's own GCP project rather than the service's
@@ -1620,8 +1624,20 @@ UpdateVendorConnectionV1 Update scalar sub-doc fields on a connection.
 
 Updates one or more scalar sub-doc fields on an existing connection
 (`refreshFrequency`, `startScanFrom`, `dataStorageLocation`, `businessNodeIds`,
-`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`). Only fields present in
-the request body are written, via a dotted-path `$set` -- never a whole-document replace.
+`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`, `runtimeMode`). Only fields
+present in the request body are written, via dotted-path `$set`/`$unset` in one update --
+never a whole-document replace.
+
+`runtimeMode` (mirrors mgr's `updateIntegrationConnectionRuntimeMode`): the tenant must have a
+deployment for the mode, as mgr's `getSupportedIntegrationConnectionRuntimeModes` decides --
+`IN_HOST`/`IN_HOST_BYOK` need an enabled InHost (`sierra_configuration`), `IN_HOME` an enabled
+InHome (`molokai_configuration`); otherwise 422 and nothing is written. Switching to
+`IN_HOST_BYOK` drops `auth.secret_path` in the same write and then deletes that Relyance-held
+Secret Manager secret (3 attempts): BYOK credentials live only in the customer's environment. If
+the deletion still fails, the mode change stays committed (204), the secret's path is recorded in
+`auth.pending_secret_deletion`, and the next runtime-mode change retries it (and clears the field).
+Switching to any other mode clears `auth.secret_ref`, which only means something for
+`IN_HOST_BYOK`.
 
 When the write includes `refreshFrequency` and/or `startScanFrom`, a best-effort "conductor
 poke" is scheduled off the request path afterward (mirrors mgr's
@@ -1754,10 +1770,9 @@ anything (`Field.fill()` + `validate()`).
 When the connection's `runtime_mode` is `IN_HOST_BYOK`, every credential field of the auth
 method lives in the customer's own secret, so only `is_top_level` fields (e.g.
 `data_storage_location`) are validated. The result is invalid when a secret field carries a
-value (the error names the keys, never the values), when `secretRef` is not an AWS Secrets
-Manager ARN or is in an AWS account other than the tenant's InHost deployment (when that account
-is known), or when an app-token (browser sign-in) auth method is combined with a secret
-reference. Relyance does not test access to the customer's secret. On any other runtime mode a
+value (the error names the keys, never the values), when `secretRef` breaks a secret-reference
+rule (see `PUT .../auth`), or when an app-token (browser sign-in) auth method is combined with a
+secret reference. 500 when the InHost deployment cannot be read to check the reference. Relyance does not test access to the customer's secret. On any other runtime mode a
 non-empty `secretRef` is invalid.
 
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().

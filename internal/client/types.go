@@ -23,6 +23,7 @@ type ScalarUpdateRequest struct {
 	BusinessNodeIDs      []string          `json:"businessNodeIds,omitempty"`
 	CredentialsExpireAt  *float64          `json:"credentialsExpireAt,omitempty"`
 	RelyanceSecretAccess *bool             `json:"relyanceSecretAccess,omitempty"`
+	RuntimeMode          *string           `json:"runtimeMode,omitempty"`
 }
 
 // AuthSaveRequest mirrors AuthSaveRequest.
@@ -85,8 +86,13 @@ func (d *ConnectionDetail) SecretRef() (string, bool) {
 // Runtime modes a connection can have (the connection's runtime_mode).
 const (
 	RuntimeModeRelyanceHosted = "RELYANCE_HOSTED"
+	RuntimeModeInHost         = "IN_HOST"
 	RuntimeModeInHostBYOK     = "IN_HOST_BYOK"
+	RuntimeModeInHome         = "IN_HOME"
 )
+
+// RuntimeModes lists every runtime mode the API accepts.
+var RuntimeModes = []string{RuntimeModeRelyanceHosted, RuntimeModeInHost, RuntimeModeInHostBYOK, RuntimeModeInHome}
 
 // Auth returns the connection's auth sub-document (nil if never configured).
 func (d *ConnectionDetail) Auth() map[string]any {
