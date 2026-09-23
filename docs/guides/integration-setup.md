@@ -544,7 +544,7 @@ Relyance stores only the ARN. The InHost scanner reads the secret at scan time.
   saves `secret_ref`.
 - Do not set `auth.secrets_wo`. `auth.params` can hold only top-level fields (fields with
   `is_top_level = true` in the `relyance_integration_vendor` data source), such as
-  `data_storage_location`.
+  `data_storage_location`. Top-level fields are not credentials: do not put them in the secret.
 - The secret must be in the AWS account of your InHost deployment, and its region must be in the
   ARN's partition. The scanner's IAM role needs `secretsmanager:GetSecretValue` on the secret. The
   Relyance InHost AWS Terraform module grants it when you add a matching ARN pattern to its
@@ -558,8 +558,10 @@ Relyance stores only the ARN. The InHost scanner reads the secret at scan time.
 #
 # For an InHost BYOK ("bring your own key") connection, the credentials never reach Relyance.
 # You keep every credential field of the auth method (secret and non-secret) in one AWS Secrets
-# Manager secret in your own AWS account, as a JSON object keyed by field name. Relyance stores
-# only the secret's ARN (secret_ref). The InHost scanner reads the secret at scan time.
+# Manager secret in your own AWS account, as a JSON object keyed by field name. Top-level fields,
+# such as data_storage_location, are not credentials: they go in auth.params, not in the secret.
+# Relyance stores only the secret's ARN (secret_ref). The InHost scanner reads the secret at scan
+# time.
 #
 # Requirements:
 # - The tenant has an enabled InHost deployment (Outpost on AWS). One apply creates the
@@ -586,9 +588,8 @@ resource "aws_secretsmanager_secret_version" "jira" {
   # placeholders: set the real values outside version control (for example, with the AWS
   # console or CLI) and keep them out of Terraform state.
   secret_string = jsonencode({
-    ORG_ID                = "REPLACE_ME"
-    API_KEY               = "REPLACE_ME"
-    data_storage_location = "us"
+    ORG_ID  = "REPLACE_ME"
+    API_KEY = "REPLACE_ME"
   })
 
   lifecycle {

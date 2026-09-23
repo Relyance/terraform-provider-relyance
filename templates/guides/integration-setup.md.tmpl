@@ -164,7 +164,7 @@ Relyance stores only the ARN. The InHost scanner reads the secret at scan time.
   saves `secret_ref`.
 - Do not set `auth.secrets_wo`. `auth.params` can hold only top-level fields (fields with
   `is_top_level = true` in the `relyance_integration_vendor` data source), such as
-  `data_storage_location`.
+  `data_storage_location`. Top-level fields are not credentials: do not put them in the secret.
 - The secret must be in the AWS account of your InHost deployment, and its region must be in the
   ARN's partition. The scanner's IAM role needs `secretsmanager:GetSecretValue` on the secret. The
   Relyance InHost AWS Terraform module grants it when you add a matching ARN pattern to its
