@@ -22,7 +22,7 @@ var _ MappedNullable = &AuthSaveRequest{}
 type AuthSaveRequest struct {
 	AuthKey              string                 `json:"authKey"`
 	CustomCreds          map[string]interface{} `json:"customCreds,omitempty"`
-	SecretRef            NullableString         `json:"secret_ref,omitempty"`
+	SecretRef            NullableString         `json:"secretRef,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -160,7 +160,7 @@ func (o AuthSaveRequest) ToMap() (map[string]interface{}, error) {
 		toSerialize["customCreds"] = o.CustomCreds
 	}
 	if o.SecretRef.IsSet() {
-		toSerialize["secret_ref"] = o.SecretRef.Get()
+		toSerialize["secretRef"] = o.SecretRef.Get()
 	}
 
 	for key, value := range o.AdditionalProperties {
@@ -207,7 +207,7 @@ func (o *AuthSaveRequest) UnmarshalJSON(data []byte) (err error) {
 	if err = json.Unmarshal(data, &additionalProperties); err == nil {
 		delete(additionalProperties, "authKey")
 		delete(additionalProperties, "customCreds")
-		delete(additionalProperties, "secret_ref")
+		delete(additionalProperties, "secretRef")
 		o.AdditionalProperties = additionalProperties
 	}
 

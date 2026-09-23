@@ -28,13 +28,14 @@ type ScalarUpdateRequest struct {
 // AuthSaveRequest mirrors AuthSaveRequest.
 //
 // SecretRef is the InHost BYOK external secret reference (an AWS Secrets
-// Manager ARN). It is tri-state on the wire: nil omits the field (the server
+// Manager ARN), sent as secretRef (reads return it as auth.secret_ref). It is
+// tri-state on the wire: nil omits the field (the server
 // keeps the stored reference), a pointer to "" clears it, and any other value
 // sets it.
 type AuthSaveRequest struct {
 	AuthKey     string         `json:"authKey"`
 	CustomCreds map[string]any `json:"customCreds"`
-	SecretRef   *string        `json:"secret_ref,omitempty"`
+	SecretRef   *string        `json:"secretRef,omitempty"`
 }
 
 // ValidateResult mirrors AuthValidateResponseSerializer.
@@ -169,9 +170,9 @@ type AuthConfig struct {
 // CustomField is one field in an auth form.
 //
 // The top-level flag marks fields the server stores as plain values on the
-// connection (e.g. data_storage_location) instead of in a secret. The catalog
-// omits false flags, and the flag has been spelled both isTopLevel and
-// is_top_level, so both spellings are decoded; use TopLevel() to read it.
+// connection (e.g. data_storage_location) instead of in a secret. The server
+// sends isTopLevel (a passthrough field, not in the OpenAPI schema) and omits
+// false values; is_top_level is also accepted. Use TopLevel() to read it.
 type CustomField struct {
 	Key             string `json:"key"`
 	Name            string `json:"name"`

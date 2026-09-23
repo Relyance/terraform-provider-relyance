@@ -230,6 +230,11 @@ monitor body `{"id", "status": "connecting"}`; the actual vendor-API call (dispa
 AuthType) runs in the background and updates `auth.status`/`auth.error` on completion. Poll
 `GET .../connections/{connection_id}` to observe the result.
 
+`IN_HOST_BYOK` connections are not tested live (Relyance does not hold their credentials; the
+scanner reports credential problems on its next scan): the connection is marked
+`AUTH_STATUS_CONNECTED` before the 202 returns. 422 when the auth method is app token (browser
+sign-in) and the connection has a `secret_ref`.
+
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
 	@param vendorKey
 	@param connectionId
@@ -360,8 +365,9 @@ When the vendor's `status` is `Inactive`, an existing never-configured connectio
 same `connection_name`/`integrationType` is reused (its id is returned) instead of creating a
 duplicate. Otherwise the new connection is auto-associated with the tenant's own business
 entity (`business_node_ids`) if one exists, and auto-selects `kinds` the vendor only supports
-one of, plus `INTEGRATION_KIND_PROPERTY_INSPECTION`/`INTEGRATION_KIND_ASSETS_DISCOVERY` when
-the vendor supports them (mirrors mgr's `create_connection`).
+one of, plus `INTEGRATION_KIND_PROPERTY_INSPECTION` and the always-enabled kinds
+(`INTEGRATION_KIND_ASSETS_DISCOVERY`, `INTEGRATION_KIND_AI_DISCOVERY`) when the vendor supports
+them (mirrors mgr's `create_connection`).
 
 Returns 201 with the created connection resource (the sub-doc as stored, including `id`) and
 a `Location` header pointing at `GET .../connections/v1/{vendor_key}/{connection_id}`.
@@ -841,6 +847,11 @@ configs (secret-masked per `get_vendor_connection_auth_configs`'s own masking ru
 support users without `relyanceSecretAccess`, or the `hide-integration-secrets` tenant
 flag), and its kind field configs.
 
+Every auth custom field carries `isTopLevel`: for an `IN_HOST_BYOK` connection only these fields
+stay in the Relyance form; every other credential field lives in the customer's secret. The
+connection sub-doc carries `auth.secret_ref` (the ARN of the customer's secret -- a location,
+not a secret) when set; `auth.secret_path` is never returned.
+
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
 	@param vendorKey
 	@param connectionId
@@ -1213,8 +1224,18 @@ SaveVendorConnectionAuthV1 Save auth-field values (is_top_level split; secrets t
 
 Saves auth-field values for a connection. Fields flagged `is_top_level` on the vendor's
 auth form are written as flat scalars on the connection sub-doc; every other field is
-stored as a GCP Secret Manager secret. No-op when the connection's `runtime_mode` is
-`IN_HOST_BYOK` -- BYOK connections never have server-side secrets.
+stored as a GCP Secret Manager secret.
+
+`IN_HOST_BYOK` connections never have server-side secrets: every credential field of the auth
+method (secret and non-secret) lives in the customer's environment -- a Kubernetes secret, or
+the AWS Secrets Manager secret named by `secretRef`. Only `is_top_level` values, `auth.type`
+and `auth.secret_ref` are stored; other non-secret values are ignored. `secretRef`: omitted or
+null keeps the stored value, an empty string clears it, anything else must be an AWS Secrets
+Manager ARN (`arn:aws:secretsmanager:<region>:<account-id>:secret:<name>`) in the tenant's InHost
+AWS account when that account is known. 422 (nothing written) when a secret field carries a
+value (the error names the keys, never the values), when `secretRef` is invalid, or when an
+app-token (browser sign-in) auth method would be used with a secret reference. A non-empty
+`secretRef` on any other runtime mode is 422.
 
 For `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the
 `auth.secret_path` built against) the tenant's own GCP project rather than the service's
@@ -1223,7 +1244,7 @@ were saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 dige
 saved secret fields only, letting a future Terraform provider detect credential drift
 without ever reading a secret value back.
 
-Returns 204 with no body (including the BYOK no-op case).
+Returns 204 with no body.
 
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
 	@param vendorKey
@@ -1471,8 +1492,9 @@ Selects or deselects an `IntegrationKind` on a connection (mirrors mgr's `connSe
 mutation, which takes the same single `selected: bool` argument). Selecting a kind for the
 first time creates its `kinds.<kind>` sub-doc (`{isSelected, customFields: []}`); selecting
 one that already exists only flips its `isSelected` flag, leaving any saved `customFields`
-in place. `INTEGRATION_KIND_ASSETS_DISCOVERY` is always forced to selected regardless of the
-request body -- it's always enabled and hidden from the UI. Once a kind has a `kinds.<kind>`
+in place. `INTEGRATION_KIND_ASSETS_DISCOVERY` and `INTEGRATION_KIND_AI_DISCOVERY` are always
+forced to selected regardless of the request body -- they're always enabled and hidden from
+the UI. Once a kind has a `kinds.<kind>`
 entry (selected or not), `PUT .../kinds/{kind}` can save parameters for it.
 
 Returns 204 with no body.
@@ -1727,8 +1749,16 @@ func (r ApiValidateVendorConnectionAuthV1Request) Execute() (*AuthValidateRespon
 ValidateVendorConnectionAuthV1 Validate auth-field values without persisting them.
 
 Validates a set of auth-field values against the vendor's auth form without persisting
-anything (`Field.fill()` + `validate()`, or `validate_byok()` when the connection's
-`runtime_mode` is `IN_HOST_BYOK`, which skips secret-field validation).
+anything (`Field.fill()` + `validate()`).
+
+When the connection's `runtime_mode` is `IN_HOST_BYOK`, every credential field of the auth
+method lives in the customer's own secret, so only `is_top_level` fields (e.g.
+`data_storage_location`) are validated. The result is invalid when a secret field carries a
+value (the error names the keys, never the values), when `secretRef` is not an AWS Secrets
+Manager ARN or is in an AWS account other than the tenant's InHost deployment (when that account
+is known), or when an app-token (browser sign-in) auth method is combined with a secret
+reference. Relyance does not test access to the customer's secret. On any other runtime mode a
+non-empty `secretRef` is invalid.
 
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
 	@param vendorKey

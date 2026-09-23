@@ -501,7 +501,7 @@
       "post": {
         "operationId": "create_vendor_connection_v1",
         "summary": "Create a new connection for a vendor.",
-        "description": "Creates a new connection for a vendor. Allocates the next per-vendor connection id\n(mirrors mgr's monotonic `vendor_connection_next_id` counter) and seeds the\n`vendors.integrations.<id>` sub-doc with `auth: {type: null, status: AUTH_STATUS_NOT_CONNECTED}`.\n\nWhen the vendor's `status` is `Inactive`, an existing never-configured connection with the\nsame `connection_name`/`integrationType` is reused (its id is returned) instead of creating a\nduplicate. Otherwise the new connection is auto-associated with the tenant's own business\nentity (`business_node_ids`) if one exists, and auto-selects `kinds` the vendor only supports\none of, plus `INTEGRATION_KIND_PROPERTY_INSPECTION`/`INTEGRATION_KIND_ASSETS_DISCOVERY` when\nthe vendor supports them (mirrors mgr's `create_connection`).\n\nReturns 201 with the created connection resource (the sub-doc as stored, including `id`) and\na `Location` header pointing at `GET .../connections/v1/{vendor_key}/{connection_id}`.\n\nSee `docs/integration-setup-example.md` for a full worked example (catalog read through\ncreate/validate/save/connect/poll/kind-selection) with real request/response JSON.",
+        "description": "Creates a new connection for a vendor. Allocates the next per-vendor connection id\n(mirrors mgr's monotonic `vendor_connection_next_id` counter) and seeds the\n`vendors.integrations.<id>` sub-doc with `auth: {type: null, status: AUTH_STATUS_NOT_CONNECTED}`.\n\nWhen the vendor's `status` is `Inactive`, an existing never-configured connection with the\nsame `connection_name`/`integrationType` is reused (its id is returned) instead of creating a\nduplicate. Otherwise the new connection is auto-associated with the tenant's own business\nentity (`business_node_ids`) if one exists, and auto-selects `kinds` the vendor only supports\none of, plus `INTEGRATION_KIND_PROPERTY_INSPECTION` and the always-enabled kinds\n(`INTEGRATION_KIND_ASSETS_DISCOVERY`, `INTEGRATION_KIND_AI_DISCOVERY`) when the vendor supports\nthem (mirrors mgr's `create_connection`).\n\nReturns 201 with the created connection resource (the sub-doc as stored, including `id`) and\na `Location` header pointing at `GET .../connections/v1/{vendor_key}/{connection_id}`.\n\nSee `docs/integration-setup-example.md` for a full worked example (catalog read through\ncreate/validate/save/connect/poll/kind-selection) with real request/response JSON.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -628,7 +628,7 @@
       "get": {
         "operationId": "get_vendor_connection_v1",
         "summary": "Get connection detail, including masked auth configs and kind configs.",
-        "description": "Fetches one connection's full detail: the raw connection sub-doc, its auth field\nconfigs (secret-masked per `get_vendor_connection_auth_configs`'s own masking rules --\nsupport users without `relyanceSecretAccess`, or the `hide-integration-secrets` tenant\nflag), and its kind field configs.",
+        "description": "Fetches one connection's full detail: the raw connection sub-doc, its auth field\nconfigs (secret-masked per `get_vendor_connection_auth_configs`'s own masking rules --\nsupport users without `relyanceSecretAccess`, or the `hide-integration-secrets` tenant\nflag), and its kind field configs.\n\nEvery auth custom field carries `isTopLevel`: for an `IN_HOST_BYOK` connection only these fields\nstay in the Relyance form; every other credential field lives in the customer's secret. The\nconnection sub-doc carries `auth.secret_ref` (the ARN of the customer's secret -- a location,\nnot a secret) when set; `auth.secret_path` is never returned.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -998,7 +998,7 @@
       "post": {
         "operationId": "validate_vendor_connection_auth_v1",
         "summary": "Validate auth-field values without persisting them.",
-        "description": "Validates a set of auth-field values against the vendor's auth form without persisting\nanything (`Field.fill()` + `validate()`, or `validate_byok()` when the connection's\n`runtime_mode` is `IN_HOST_BYOK`, which skips secret-field validation).",
+        "description": "Validates a set of auth-field values against the vendor's auth form without persisting\nanything (`Field.fill()` + `validate()`).\n\nWhen the connection's `runtime_mode` is `IN_HOST_BYOK`, every credential field of the auth\nmethod lives in the customer's own secret, so only `is_top_level` fields (e.g.\n`data_storage_location`) are validated. The result is invalid when a secret field carries a\nvalue (the error names the keys, never the values), when `secretRef` is not an AWS Secrets\nManager ARN or is in an AWS account other than the tenant's InHost deployment (when that account\nis known), or when an app-token (browser sign-in) auth method is combined with a secret\nreference. Relyance does not test access to the customer's secret. On any other runtime mode a\nnon-empty `secretRef` is invalid.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -1134,7 +1134,7 @@
       "put": {
         "operationId": "save_vendor_connection_auth_v1",
         "summary": "Save auth-field values (is_top_level split; secrets to GCP Secret Manager).",
-        "description": "Saves auth-field values for a connection. Fields flagged `is_top_level` on the vendor's\nauth form are written as flat scalars on the connection sub-doc; every other field is\nstored as a GCP Secret Manager secret. No-op when the connection's `runtime_mode` is\n`IN_HOST_BYOK` -- BYOK connections never have server-side secrets.\n\nFor `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the\n`auth.secret_path` built against) the tenant's own GCP project rather than the service's\ndefault project. Every save also sets `auth.updated_at` (epoch seconds); when secret fields\nwere saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 digest of the\nsaved secret fields only, letting a future Terraform provider detect credential drift\nwithout ever reading a secret value back.\n\nReturns 204 with no body (including the BYOK no-op case).",
+        "description": "Saves auth-field values for a connection. Fields flagged `is_top_level` on the vendor's\nauth form are written as flat scalars on the connection sub-doc; every other field is\nstored as a GCP Secret Manager secret.\n\n`IN_HOST_BYOK` connections never have server-side secrets: every credential field of the auth\nmethod (secret and non-secret) lives in the customer's environment -- a Kubernetes secret, or\nthe AWS Secrets Manager secret named by `secretRef`. Only `is_top_level` values, `auth.type`\nand `auth.secret_ref` are stored; other non-secret values are ignored. `secretRef`: omitted or\nnull keeps the stored value, an empty string clears it, anything else must be an AWS Secrets\nManager ARN (`arn:aws:secretsmanager:<region>:<account-id>:secret:<name>`) in the tenant's InHost\nAWS account when that account is known. 422 (nothing written) when a secret field carries a\nvalue (the error names the keys, never the values), when `secretRef` is invalid, or when an\napp-token (browser sign-in) auth method would be used with a secret reference. A non-empty\n`secretRef` on any other runtime mode is 422.\n\nFor `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the\n`auth.secret_path` built against) the tenant's own GCP project rather than the service's\ndefault project. Every save also sets `auth.updated_at` (epoch seconds); when secret fields\nwere saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 digest of the\nsaved secret fields only, letting a future Terraform provider detect credential drift\nwithout ever reading a secret value back.\n\nReturns 204 with no body.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -1546,7 +1546,7 @@
       "put": {
         "operationId": "select_vendor_connection_kind_v1",
         "summary": "Select or deselect an IntegrationKind on a connection.",
-        "description": "Selects or deselects an `IntegrationKind` on a connection (mirrors mgr's `connSetCheckbox`\nmutation, which takes the same single `selected: bool` argument). Selecting a kind for the\nfirst time creates its `kinds.<kind>` sub-doc (`{isSelected, customFields: []}`); selecting\none that already exists only flips its `isSelected` flag, leaving any saved `customFields`\nin place. `INTEGRATION_KIND_ASSETS_DISCOVERY` is always forced to selected regardless of the\nrequest body -- it's always enabled and hidden from the UI. Once a kind has a `kinds.<kind>`\nentry (selected or not), `PUT .../kinds/{kind}` can save parameters for it.\n\nReturns 204 with no body.",
+        "description": "Selects or deselects an `IntegrationKind` on a connection (mirrors mgr's `connSetCheckbox`\nmutation, which takes the same single `selected: bool` argument). Selecting a kind for the\nfirst time creates its `kinds.<kind>` sub-doc (`{isSelected, customFields: []}`); selecting\none that already exists only flips its `isSelected` flag, leaving any saved `customFields`\nin place. `INTEGRATION_KIND_ASSETS_DISCOVERY` and `INTEGRATION_KIND_AI_DISCOVERY` are always\nforced to selected regardless of the request body -- they're always enabled and hidden from\nthe UI. Once a kind has a `kinds.<kind>`\nentry (selected or not), `PUT .../kinds/{kind}` can save parameters for it.\n\nReturns 204 with no body.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -1684,7 +1684,7 @@
       "post": {
         "operationId": "connect_vendor_connection_v1",
         "summary": "Kick off a live connect/test attempt (async; poll GET for the result).",
-        "description": "Kicks off a live connect/test attempt for a connection and returns 202 immediately with a\nmonitor body `{\"id\", \"status\": \"connecting\"}`; the actual vendor-API call (dispatched by\nAuthType) runs in the background and updates `auth.status`/`auth.error` on completion. Poll\n`GET .../connections/{connection_id}` to observe the result.",
+        "description": "Kicks off a live connect/test attempt for a connection and returns 202 immediately with a\nmonitor body `{\"id\", \"status\": \"connecting\"}`; the actual vendor-API call (dispatched by\nAuthType) runs in the background and updates `auth.status`/`auth.error` on completion. Poll\n`GET .../connections/{connection_id}` to observe the result.\n\n`IN_HOST_BYOK` connections are not tested live (Relyance does not hold their credentials; the\nscanner reports credential problems on its next scan): the connection is marked\n`AUTH_STATUS_CONNECTED` before the 202 returns. 422 when the auth method is app token (browser\nsign-in) and the connection has a `secret_ref`.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -1940,8 +1940,8 @@
             "type": "object",
             "title": "Customcreds"
           },
-          "secret_ref": {
-            "description": "InHost BYOK only: ARN of an AWS Secrets Manager secret in the customer's own AWS account that holds every credential field of the auth method as a JSON object. Omitted leaves the stored reference unchanged; an empty string clears it. Rejected for connections whose `runtime_mode` is not `IN_HOST_BYOK`, for app-token auth methods, and for an ARN in a different AWS account than the tenant's InHost deployment.",
+          "secretRef": {
+            "description": "IN_HOST_BYOK only. AWS Secrets Manager ARN of the secret that holds every credential field of the auth method (arn:aws:secretsmanager:<region>:<account-id>:secret:<name>). Omit or null: keep the stored value. Empty string: clear it (the scanner reads the Kubernetes secret instead). The ARN is a location, not a secret.",
             "anyOf": [
               {
                 "type": "string"
@@ -1950,7 +1950,7 @@
                 "type": "null"
               }
             ],
-            "title": "Secret Ref"
+            "title": "Secretref"
           }
         },
         "required": [
@@ -1971,8 +1971,8 @@
             "type": "object",
             "title": "Customcreds"
           },
-          "secret_ref": {
-            "description": "InHost BYOK only: ARN of the customer's AWS Secrets Manager secret. Checked for format and account only; Relyance never reads the secret.",
+          "secretRef": {
+            "description": "IN_HOST_BYOK only. AWS Secrets Manager ARN of the secret that holds every credential field of the auth method (arn:aws:secretsmanager:<region>:<account-id>:secret:<name>). Omit or null: keep the stored value. Empty string: clear it (the scanner reads the Kubernetes secret instead). The ARN is a location, not a secret.",
             "anyOf": [
               {
                 "type": "string"
@@ -1981,7 +1981,7 @@
                 "type": "null"
               }
             ],
-            "title": "Secret Ref"
+            "title": "Secretref"
           }
         },
         "required": [

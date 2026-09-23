@@ -190,8 +190,8 @@ func TestSaveAuthSecretRefTriState(t *testing.T) {
 		want string
 	}{
 		{"absent leaves it unchanged", nil, `{"authKey":"api-key","customCreds":{"data_storage_location":"us"}}`},
-		{"empty clears it", &empty, `{"authKey":"api-key","customCreds":{"data_storage_location":"us"},"secret_ref":""}`},
-		{"value sets it", &ref, `{"authKey":"api-key","customCreds":{"data_storage_location":"us"},"secret_ref":"` + arn + `"}`},
+		{"empty clears it", &empty, `{"authKey":"api-key","customCreds":{"data_storage_location":"us"},"secretRef":""}`},
+		{"value sets it", &ref, `{"authKey":"api-key","customCreds":{"data_storage_location":"us"},"secretRef":"` + arn + `"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -222,7 +222,7 @@ func TestValidateAuthSendsSecretRef(t *testing.T) {
 	if _, err := c.ValidateAuth(context.Background(), "atlassian_jira", "3", AuthSaveRequest{AuthKey: "api-key", SecretRef: &ref}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rec.body, `"secret_ref":"`+arn+`"`) {
+	if !strings.Contains(rec.body, `"secretRef":"`+arn+`"`) {
 		t.Fatalf("body = %s", rec.body)
 	}
 }

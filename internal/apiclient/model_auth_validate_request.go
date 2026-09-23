@@ -23,7 +23,7 @@ type AuthValidateRequest struct {
 	// The vendor auth config's key (stored at connection.auth.type).
 	AuthKey              string                 `json:"authKey"`
 	CustomCreds          map[string]interface{} `json:"customCreds,omitempty"`
-	SecretRef            NullableString         `json:"secret_ref,omitempty"`
+	SecretRef            NullableString         `json:"secretRef,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -161,7 +161,7 @@ func (o AuthValidateRequest) ToMap() (map[string]interface{}, error) {
 		toSerialize["customCreds"] = o.CustomCreds
 	}
 	if o.SecretRef.IsSet() {
-		toSerialize["secret_ref"] = o.SecretRef.Get()
+		toSerialize["secretRef"] = o.SecretRef.Get()
 	}
 
 	for key, value := range o.AdditionalProperties {
@@ -208,7 +208,7 @@ func (o *AuthValidateRequest) UnmarshalJSON(data []byte) (err error) {
 	if err = json.Unmarshal(data, &additionalProperties); err == nil {
 		delete(additionalProperties, "authKey")
 		delete(additionalProperties, "customCreds")
-		delete(additionalProperties, "secret_ref")
+		delete(additionalProperties, "secretRef")
 		o.AdditionalProperties = additionalProperties
 	}
 
