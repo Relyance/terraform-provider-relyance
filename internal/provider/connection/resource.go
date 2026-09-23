@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -23,10 +25,11 @@ import (
 )
 
 var (
-	_ resource.Resource                = &connectionResource{}
-	_ resource.ResourceWithConfigure   = &connectionResource{}
-	_ resource.ResourceWithImportState = &connectionResource{}
-	_ resource.ResourceWithModifyPlan  = &connectionResource{}
+	_ resource.Resource                   = &connectionResource{}
+	_ resource.ResourceWithConfigure      = &connectionResource{}
+	_ resource.ResourceWithImportState    = &connectionResource{}
+	_ resource.ResourceWithModifyPlan     = &connectionResource{}
+	_ resource.ResourceWithValidateConfig = &connectionResource{}
 )
 
 // NewResource returns the relyance_integration_connection resource.
@@ -174,6 +177,27 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					},
 				},
 			},
+			"secret_ref": schema.StringAttribute{
+				Optional: true,
+				Description: "InHost BYOK only: ARN of an AWS Secrets Manager secret in your own AWS account that " +
+					"holds every credential field of auth.method (secret and non-secret) as one JSON object. " +
+					"Relyance stores only this ARN; the InHost scanner reads the secret at scan time, so its " +
+					"IAM role needs secretsmanager:GetSecretValue on it. Requires runtime_mode = IN_HOST_BYOK " +
+					"(set in the Relyance app) and an auth block; with it, auth.secrets_wo must be unset and " +
+					"auth.params may hold only top-level fields such as data_storage_location. Removing it " +
+					"clears the reference.",
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(secretRefPattern, secretRefPatternMessage),
+				},
+			},
+			"runtime_mode": schema.StringAttribute{
+				Computed: true,
+				Description: "Where the connection's scanner runs and where its credentials live " +
+					"(RELYANCE_HOSTED, IN_HOST, IN_HOME or IN_HOST_BYOK). Set in the Relyance app; read-only here.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"connect_on_apply": schema.BoolAttribute{
 				Optional: true,
 				Description: "When true, trigger a live credential test after each apply that changes " +
@@ -246,7 +270,7 @@ func (r *connectionResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 
 	if plan.Auth != nil {
-		if !r.saveAuth(ctx, req.Config, &plan, &resp.Diagnostics) {
+		if !r.saveAuth(ctx, req.Config, &plan, secretRefWire(plan.SecretRef, nil), &resp.Diagnostics) {
 			return
 		}
 	}
@@ -330,8 +354,11 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 		}
 	}
 
-	if authChanged(plan.Auth, state.Auth) {
-		if !r.saveAuth(ctx, req.Config, &plan, &resp.Diagnostics) {
+	// A secret_ref change rides on the auth save (the server takes it with
+	// the auth method); removing it from config sends "" to clear it.
+	secretRef := secretRefWire(plan.SecretRef, &state)
+	if authChanged(plan.Auth, state.Auth) || secretRef != nil {
+		if !r.saveAuth(ctx, req.Config, &plan, secretRef, &resp.Diagnostics) {
 			return
 		}
 	}
@@ -423,18 +450,41 @@ func (r *connectionResource) ModifyPlan(ctx context.Context, req resource.Modify
 		return
 	}
 
+	var state *resourceModel // nil on create
+	if !req.State.Raw.IsNull() {
+		state = &resourceModel{}
+		resp.Diagnostics.Append(req.State.Get(ctx, state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	// The server recomputes credentials_fingerprint / status / updated_at when the
 	// auth block changes; mark them unknown so UseStateForUnknown doesn't pin stale
 	// values through the update. Must stay ahead of the validate_on_plan gate below:
 	// skipping it leaves a known planned value that apply contradicts.
-	if plan.Auth != nil && !req.State.Raw.IsNull() {
-		var state resourceModel
-		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-		if !resp.Diagnostics.HasError() && authChanged(plan.Auth, state.Auth) {
-			resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("credentials_fingerprint"), types.StringUnknown())...)
-			resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("status"), types.StringUnknown())...)
-			resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("updated_at"), types.StringUnknown())...)
-		}
+	if plan.Auth != nil && state != nil &&
+		(authChanged(plan.Auth, state.Auth) || secretRefWire(plan.SecretRef, state) != nil) {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("credentials_fingerprint"), types.StringUnknown())...)
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("status"), types.StringUnknown())...)
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("auth").AtName("updated_at"), types.StringUnknown())...)
+	}
+
+	// InHost BYOK rules that need only config and prior state (runtime_mode is
+	// refreshed into state before planning). Not gated on validate_on_plan: they
+	// cost no API call and the server rejects the same things at apply.
+	var cfg resourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	cfgSecrets := types.MapNull(types.StringType)
+	if cfg.Auth != nil {
+		cfgSecrets = cfg.Auth.SecretsWO
+	}
+	resp.Diagnostics.Append(byokPlanDiags(ctx, &plan, state, cfgSecrets)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	// Catalog-backed plan-time validation is best-effort and opt-out: skip for an
@@ -460,8 +510,19 @@ func (r *connectionResource) ModifyPlan(ctx context.Context, req resource.Modify
 	}
 
 	if plan.Auth != nil {
-		r.validateAuthPlan(ctx, req, resp, &plan, vendor)
+		r.validateAuthPlan(ctx, req, resp, &plan, state, vendor)
 	}
+}
+
+// ValidateConfig runs the config-only secret_ref checks (no state or network),
+// so they also fire in `terraform validate`.
+func (r *connectionResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg resourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(validateSecretRefConfig(ctx, &cfg)...)
 }
 
 // validateAuthPlan runs the catalog-backed structural checks on the auth
@@ -472,8 +533,10 @@ func (r *connectionResource) validateAuthPlan(
 	req resource.ModifyPlanRequest,
 	resp *resource.ModifyPlanResponse,
 	plan *resourceModel,
+	state *resourceModel,
 	vendor *client.Vendor,
 ) {
+	byok := isBYOK(state)
 	authPath := path.Root("auth")
 	method := plan.Auth.Method
 	if method.IsNull() || method.IsUnknown() {
@@ -515,22 +578,27 @@ func (r *connectionResource) validateAuthPlan(
 		if !known[k] {
 			resp.Diagnostics.AddAttributeError(authPath.AtName("params"), "Unknown auth field",
 				fmt.Sprintf("field %q is not part of method %s for vendor %s", k, matched.Slug, vendor.VendorKey))
-		} else if secretField[k] {
+		} else if secretField[k] && !byok { // BYOK: reported by byokParamDiags below
 			resp.Diagnostics.AddAttributeError(authPath.AtName("params"), "Secret field in params",
 				fmt.Sprintf("field %q is a secret — move it to auth.secrets_wo so it never lands in state", k))
 		}
 	}
 
+	if byok {
+		resp.Diagnostics.Append(byokParamDiags(params, matched, vendor.VendorKey)...)
+	}
+
 	// Secrets come from CONFIG (write-only). Keys are checkable; values are
-	// only sent, never diffed.
+	// only sent, never diffed. On a BYOK connection any secrets_wo is already
+	// an error (byokPlanDiags), so the per-key checks are skipped.
 	var cfg resourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
 	if resp.Diagnostics.HasError() || cfg.Auth == nil {
 		return
 	}
 	secrets := cfg.Auth.SecretsWO
-	if secrets.IsUnknown() {
-		return
+	if secrets.IsUnknown() || byok {
+		secrets = types.MapNull(types.StringType)
 	}
 	var secretVals map[string]string
 	if !secrets.IsNull() {
@@ -559,10 +627,15 @@ func (r *connectionResource) validateAuthPlan(
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	result, err := r.svc.ValidateAuth(ctx, plan.Vendor.ValueString(), plan.ID.ValueString(), client.AuthSaveRequest{
+	validateReq := client.AuthSaveRequest{
 		AuthKey:     method.ValueString(),
 		CustomCreds: creds,
-	})
+	}
+	if knownString(plan.SecretRef) {
+		v := plan.SecretRef.ValueString()
+		validateReq.SecretRef = &v
+	}
+	result, err := r.svc.ValidateAuth(ctx, plan.Vendor.ValueString(), plan.ID.ValueString(), validateReq)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Could not validate credentials at plan time",
 			fmt.Sprintf("server validation failed to run (%s); the apply will enforce it", err))
@@ -581,26 +654,45 @@ func (r *connectionResource) validateAuthPlan(
 }
 
 // saveAuth issues PUT .../auth from the CONFIG's auth block (write-only
-// secret values exist only there). Returns false on error.
-func (r *connectionResource) saveAuth(ctx context.Context, config tfsdk.Config, plan *resourceModel, diags *diag.Diagnostics) bool {
-	var cfg resourceModel
-	diags.Append(config.Get(ctx, &cfg)...)
-	if diags.HasError() {
-		return false
+// secret values exist only there). secretRef is the secret_ref to send (nil
+// leaves it unchanged, "" clears it). Without an auth block (clearing a
+// secret_ref after import) it re-sends the connection's current auth method
+// with no field values. Returns false on error.
+func (r *connectionResource) saveAuth(ctx context.Context, config tfsdk.Config, plan *resourceModel, secretRef *string, diags *diag.Diagnostics) bool {
+	req := client.AuthSaveRequest{SecretRef: secretRef}
+	if plan.Auth != nil {
+		var cfg resourceModel
+		diags.Append(config.Get(ctx, &cfg)...)
+		if diags.HasError() {
+			return false
+		}
+		var secrets types.Map
+		if cfg.Auth != nil {
+			secrets = cfg.Auth.SecretsWO
+		}
+		creds, mdiags := mergeAuthCreds(ctx, plan.Auth.Params, secrets)
+		diags.Append(mdiags...)
+		if diags.HasError() {
+			return false
+		}
+		req.AuthKey = plan.Auth.Method.ValueString()
+		req.CustomCreds = creds
+	} else {
+		detail, err := r.svc.Get(ctx, plan.Vendor.ValueString(), plan.ID.ValueString())
+		if err != nil {
+			diags.AddAttributeError(path.Root("secret_ref"), "Reading connection auth method", err.Error())
+			return false
+		}
+		method, _ := detail.Auth()["type"].(string)
+		if method == "" {
+			diags.AddAttributeError(path.Root("secret_ref"), "Connection has no auth method",
+				"secret_ref is saved together with the connection's auth method, and this connection has none. "+
+					"Add an auth block with auth.method.")
+			return false
+		}
+		req.AuthKey = method
 	}
-	var secrets types.Map
-	if cfg.Auth != nil {
-		secrets = cfg.Auth.SecretsWO
-	}
-	creds, mdiags := mergeAuthCreds(ctx, plan.Auth.Params, secrets)
-	diags.Append(mdiags...)
-	if diags.HasError() {
-		return false
-	}
-	err := r.svc.SaveAuth(ctx, plan.Vendor.ValueString(), plan.ID.ValueString(), client.AuthSaveRequest{
-		AuthKey:     plan.Auth.Method.ValueString(),
-		CustomCreds: creds,
-	})
+	err := r.svc.SaveAuth(ctx, plan.Vendor.ValueString(), plan.ID.ValueString(), req)
 	if err != nil {
 		diags.AddAttributeError(path.Root("auth"), "Saving connection credentials", err.Error())
 		return false
@@ -614,6 +706,13 @@ func (r *connectionResource) readBack(ctx context.Context, m *resourceModel) (ok
 	detail, err := r.svc.Get(ctx, m.Vendor.ValueString(), m.ID.ValueString())
 	if err != nil {
 		return false, err.Error()
+	}
+	wantRef := m.SecretRef
+	if got, _ := detail.SecretRef(); knownString(wantRef) && got != wantRef.ValueString() {
+		// Name the cause instead of letting Terraform report an inconsistent result.
+		return false, fmt.Sprintf("the server did not store secret_ref %q (it reports %q). The Relyance API may "+
+			"not support secret_ref yet, or the connection's runtime_mode changed during the apply.",
+			wantRef.ValueString(), got)
 	}
 	if diags := m.refreshFromAPI(ctx, detail); diags.HasError() {
 		return false, "mapping server response to state"

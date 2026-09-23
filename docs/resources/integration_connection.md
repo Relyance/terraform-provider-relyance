@@ -68,11 +68,13 @@ resource "relyance_integration_connection" "s3" {
 - `refresh_frequency_seconds` (Number) How often to rescan, in seconds.
 - `scan_from` (String) RFC3339 timestamp; scans consider data from this point forward (e.g. 2026-08-01T00:00:00Z).
 - `scans` (Attributes Map) Scan capabilities to enable on this connection, keyed by scan slug (e.g. data-inspection, assets-discovery — see the relyance_integration_vendor data source). (see [below for nested schema](#nestedatt--scans))
+- `secret_ref` (String) InHost BYOK only: ARN of an AWS Secrets Manager secret in your own AWS account that holds every credential field of auth.method (secret and non-secret) as one JSON object. Relyance stores only this ARN; the InHost scanner reads the secret at scan time, so its IAM role needs secretsmanager:GetSecretValue on it. Requires runtime_mode = IN_HOST_BYOK (set in the Relyance app) and an auth block; with it, auth.secrets_wo must be unset and auth.params may hold only top-level fields such as data_storage_location. Removing it clears the reference.
 - `support_secret_access` (Boolean) Allow Relyance support to access stored secrets for troubleshooting.
 
 ### Read-Only
 
 - `id` (String) Server-allocated connection id, unique within the vendor.
+- `runtime_mode` (String) Where the connection's scanner runs and where its credentials live (RELYANCE_HOSTED, IN_HOST, IN_HOME or IN_HOST_BYOK). Set in the Relyance app; read-only here.
 
 <a id="nestedatt--auth"></a>
 ### Nested Schema for `auth`

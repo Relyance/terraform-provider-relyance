@@ -71,6 +71,8 @@ type resourceModel struct {
 	Auth                *authModel                `tfsdk:"auth"`
 	Scans               types.Map                 `tfsdk:"scans"`
 	ConnectOnApply      types.Bool                `tfsdk:"connect_on_apply"`
+	SecretRef           types.String              `tfsdk:"secret_ref"`
+	RuntimeMode         types.String              `tfsdk:"runtime_mode"`
 }
 
 // dataStorageLocationModel is the Relyance Location shape (region/country/state,
@@ -285,6 +287,16 @@ func (m *resourceModel) refreshFromAPI(ctx context.Context, d *client.Connection
 		if v, ok := d.BoolField("relyanceSecretAccess"); ok {
 			m.SupportSecretAccess = types.BoolValue(v)
 		}
+	}
+	// runtime_mode is server-owned (set in the Relyance app) and always known
+	// after a read. secret_ref is always read back, set or not: it is the
+	// practitioner's to manage, so a reference added or removed outside
+	// Terraform shows as drift (and import picks it up).
+	m.RuntimeMode = types.StringValue(d.RuntimeMode())
+	if v, ok := d.SecretRef(); ok {
+		m.SecretRef = types.StringValue(v)
+	} else {
+		m.SecretRef = types.StringNull()
 	}
 	return diags
 }

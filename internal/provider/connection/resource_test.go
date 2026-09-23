@@ -14,11 +14,14 @@ import (
 
 // fakeService records calls and serves canned responses.
 type fakeService struct {
-	calls     []string
-	detail    *client.ConnectionDetail
-	created   string
-	getErr    error
-	vendorErr error
+	calls        []string
+	detail       *client.ConnectionDetail
+	created      string
+	getErr       error
+	vendorErr    error
+	vendor       *client.Vendor
+	saveReqs     []client.AuthSaveRequest
+	validateReqs []client.AuthSaveRequest
 }
 
 func (f *fakeService) Create(_ context.Context, vendorKey string, req client.CreateConnectionRequest) (string, error) {
@@ -46,11 +49,13 @@ func (f *fakeService) Delete(_ context.Context, vendorKey, id string) error {
 
 func (f *fakeService) SaveAuth(_ context.Context, vendorKey, id string, req client.AuthSaveRequest) error {
 	f.calls = append(f.calls, fmt.Sprintf("saveauth %s/%s %s", vendorKey, id, req.AuthKey))
+	f.saveReqs = append(f.saveReqs, req)
 	return nil
 }
 
 func (f *fakeService) ValidateAuth(_ context.Context, vendorKey, id string, req client.AuthSaveRequest) (*client.ValidateResult, error) {
 	f.calls = append(f.calls, fmt.Sprintf("validate %s/%s %s", vendorKey, id, req.AuthKey))
+	f.validateReqs = append(f.validateReqs, req)
 	return &client.ValidateResult{IsValid: true}, nil
 }
 
@@ -73,6 +78,9 @@ func (f *fakeService) GetVendor(_ context.Context, vendorKey string) (*client.Ve
 	f.calls = append(f.calls, fmt.Sprintf("vendor %s", vendorKey))
 	if f.vendorErr != nil {
 		return nil, f.vendorErr
+	}
+	if f.vendor != nil {
+		return f.vendor, nil
 	}
 	return &client.Vendor{VendorKey: vendorKey}, nil
 }
