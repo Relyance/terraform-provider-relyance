@@ -177,21 +177,20 @@ type AuthConfig struct {
 //
 // The top-level flag marks fields the server stores as plain values on the
 // connection (e.g. data_storage_location) instead of in a secret. The server
-// sends isTopLevel (a passthrough field, not in the OpenAPI schema) and omits
-// false values; is_top_level is also accepted. Use TopLevel() to read it.
+// sends isTopLevel (a passthrough field, not in the OpenAPI schema). Use
+// TopLevel() to read it.
 type CustomField struct {
-	Key             string `json:"key"`
-	Name            string `json:"name"`
-	DefaultValue    string `json:"defaultValue"`
-	IsThisSecret    bool   `json:"isThisSecret"`
-	FieldType       string `json:"fieldType"`
-	IsTopLevel      bool   `json:"isTopLevel"`
-	IsTopLevelSnake bool   `json:"is_top_level"`
+	Key          string `json:"key"`
+	Name         string `json:"name"`
+	DefaultValue string `json:"defaultValue"`
+	IsThisSecret bool   `json:"isThisSecret"`
+	FieldType    string `json:"fieldType"`
+	IsTopLevel   bool   `json:"isTopLevel"`
 }
 
 // TopLevel reports whether the field is stored as a plain value on the
 // connection rather than as a credential.
-func (f CustomField) TopLevel() bool { return f.IsTopLevel || f.IsTopLevelSnake }
+func (f CustomField) TopLevel() bool { return f.IsTopLevel }
 
 // ConnectStatus mirrors the 202 monitor body from POST .../connect.
 type ConnectStatus struct {

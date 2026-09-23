@@ -249,12 +249,12 @@ func TestByokPlanDiags(t *testing.T) {
 func TestByokParamDiags(t *testing.T) {
 	matched := &client.AuthConfig{Slug: "api-key", CustomFields: []client.CustomField{
 		{Key: "data_storage_location", IsTopLevel: true},
-		{Key: "region_hint", IsTopLevelSnake: true},
+		{Key: "region_hint", IsTopLevel: true},
 		{Key: "ORG_ID", IsThisSecret: true},
 		{Key: "base_url"},
 	}}
 	if d := byokParamDiags(map[string]string{"data_storage_location": "us", "region_hint": "x", "not_a_field": "y"}, matched, "atlassian_jira"); d.HasError() {
-		t.Fatalf("top-level (both spellings) and unknown keys must pass here: %v", d)
+		t.Fatalf("top-level and unknown keys must pass here: %v", d)
 	}
 	d := byokParamDiags(map[string]string{"base_url": "https://example.com", "ORG_ID": "o", "data_storage_location": "us"}, matched, "atlassian_jira")
 	if n := d.ErrorsCount(); n != 2 {

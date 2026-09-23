@@ -249,14 +249,14 @@ func TestConnectionDetailRuntimeModeAndSecretRef(t *testing.T) {
 	}
 }
 
-func TestCustomFieldTopLevelDecodesBothSpellings(t *testing.T) {
+func TestCustomFieldTopLevelDecodesIsTopLevel(t *testing.T) {
 	v, err := vendorFromRaw(map[string]any{
 		"vendorKey": "atlassian_jira",
 		"authConfigs": []any{map[string]any{
 			"key": "AUTH_TYPE_API_KEY", "slug": "api-key",
 			"customFields": []any{
 				map[string]any{"key": "data_storage_location", "isTopLevel": true},
-				map[string]any{"key": "region", "is_top_level": true},
+				map[string]any{"key": "region", "isTopLevel": false},
 				map[string]any{"key": "API_KEY", "isThisSecret": true},
 			},
 		}},
@@ -265,7 +265,7 @@ func TestCustomFieldTopLevelDecodesBothSpellings(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := v.AuthConfigs[0].CustomFields
-	if !f[0].TopLevel() || !f[1].TopLevel() || f[2].TopLevel() {
+	if !f[0].TopLevel() || f[1].TopLevel() || f[2].TopLevel() {
 		t.Fatalf("top-level flags = %v %v %v", f[0].TopLevel(), f[1].TopLevel(), f[2].TopLevel())
 	}
 }
