@@ -25,10 +25,14 @@ import (
 // auth fields (for example data_storage_location) are still sent to Relyance.
 
 // secretRefPattern is the server's accepted AWS Secrets Manager secret ARN
-// shape (aws, aws-us-gov and aws-cn partitions). Group 1 is the partition,
+// shape (aws, aws-us-gov and aws-cn partitions): an account of 12 ASCII digits
+// and a region with at least one letter or digit. Group 1 is the partition,
 // group 2 the region.
 var secretRefPattern = regexp.MustCompile(
-	`^arn:(aws|aws-us-gov|aws-cn):secretsmanager:([a-z0-9-]+):\d{12}:secret:[A-Za-z0-9/_+=.@-]+$`)
+	`^arn:(aws|aws-us-gov|aws-cn):secretsmanager:(-*[a-z0-9][a-z0-9-]*):[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$`)
+
+// maxSecretRefLength is the longest secret_ref the server accepts.
+const maxSecretRefLength = 2048
 
 const secretRefPatternMessage = "must be an AWS Secrets Manager secret ARN, " +
 	"e.g. arn:aws:secretsmanager:us-east-1:123456789012:secret:relyance/inhost/jira-AbCdEf"
@@ -37,6 +41,9 @@ const secretRefPatternMessage = "must be an AWS Secrets Manager secret ARN, " +
 // is). It mirrors the server: the ARN shape, and a region that belongs to the
 // ARN's partition (aws-cn: cn-*, aws-us-gov: us-gov-*, aws: neither).
 func secretRefProblem(v string) string {
+	if len(v) > maxSecretRefLength {
+		return fmt.Sprintf("must be at most %d characters", maxSecretRefLength)
+	}
 	m := secretRefPattern.FindStringSubmatch(v)
 	if m == nil {
 		return secretRefPatternMessage

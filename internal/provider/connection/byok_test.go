@@ -53,6 +53,8 @@ func TestSecretRefValidator(t *testing.T) {
 		t.Fatalf("validators = %d, want 1", len(ref.Validators))
 	}
 	v := ref.Validators[0]
+	prefix := "arn:aws:secretsmanager:us-east-1:123456789012:secret:"
+	atCap := prefix + strings.Repeat("x", maxSecretRefLength-len(prefix))
 
 	cases := []struct {
 		in    string
@@ -78,6 +80,13 @@ func TestSecretRefValidator(t *testing.T) {
 		{"arn:aws-us-gov:secretsmanager:us-east-1:123456789012:secret:x", false},   // aws-us-gov + commercial region
 		{"arn:aws-cn:secretsmanager:cn-northwest-1:123456789012:secret:x", true},
 		{"arn:aws-us-gov:secretsmanager:us-gov-east-1:123456789012:secret:x", true},
+		{"arn:aws:secretsmanager:us-east-1:١٢٣٤٥٦٧٨٩٠١٢:secret:x", false}, // non-ASCII digits
+		{"arn:aws:secretsmanager:us-east-1:１２３４５６７８９０１２:secret:x", false}, // fullwidth digits
+		{"arn:aws:secretsmanager:-:123456789012:secret:x", false},         // region is only "-"
+		{"arn:aws:secretsmanager:---:123456789012:secret:x", false},       // region of only dashes
+		{"arn:aws:secretsmanager::123456789012:secret:x", false},          // empty region
+		{atCap, true},        // 2048 characters
+		{atCap + "x", false}, // 2049 characters
 	}
 	for _, tc := range cases {
 		req := validator.StringRequest{Path: path.Root("secret_ref"), ConfigValue: types.StringValue(tc.in)}
