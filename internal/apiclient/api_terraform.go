@@ -233,7 +233,7 @@ AuthType) runs in the background and updates `auth.status`/`auth.error` on compl
 `IN_HOST_BYOK` connections are not tested live (Relyance does not hold their credentials; the
 scanner reports credential problems on its next scan): the connection is marked
 `AUTH_STATUS_CONNECTED` before the 202 returns. 422 when the auth method is app token (browser
-sign-in) and the connection has a `secret_ref`.
+sign-in) and the connection has a secret reference.
 
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
 	@param vendorKey
@@ -847,10 +847,10 @@ configs (secret-masked per `get_vendor_connection_auth_configs`'s own masking ru
 support users without `relyanceSecretAccess`, or the `hide-integration-secrets` tenant
 flag), and its kind field configs.
 
-Every auth custom field carries `isTopLevel`: for an `IN_HOST_BYOK` connection only these fields
-stay in the Relyance form; every other credential field lives in the customer's secret. The
-connection sub-doc carries `auth.secret_ref` (the ARN of the customer's secret -- a location,
-not a secret) when set; `auth.secret_path` is never returned.
+Every auth custom field has `isTopLevel`. For an `IN_HOST_BYOK` connection, only the fields with
+`isTopLevel` true are entered in Relyance; all other credential fields are in the customer's own
+secret. When the connection has a secret reference, the response gives it in `auth.secret_ref`:
+the ARN of the customer's secret, not a secret value.
 
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
 	@param vendorKey
@@ -1226,20 +1226,21 @@ Saves auth-field values for a connection. Fields flagged `is_top_level` on the v
 auth form are written as flat scalars on the connection sub-doc; every other field is
 stored as a GCP Secret Manager secret.
 
-`IN_HOST_BYOK` connections never have server-side secrets: every credential field of the auth
-method (secret and non-secret) lives in the customer's environment -- a Kubernetes secret, or
-the AWS Secrets Manager secret named by `secretRef`. Only `is_top_level` values, `auth.type`
-and `auth.secret_ref` are stored; other non-secret values are ignored. `secretRef`: omitted or
-null keeps the stored value, an empty string clears it, anything else must be an AWS Secrets
-Manager ARN (`arn:<partition>:secretsmanager:<region>:<account-id>:secret:<name>`, region inside
-the partition) whose (partition, account) is the tenant's InHost (Outpost) deployment on AWS. It
-is rejected when the tenant has no enabled InHost deployment or it is on GCP ("Secret references
-are available only for Outpost on AWS."), and when the deployment's AWS account is unknown; a
-failure to read the deployment is 500 (fail closed). 422 (nothing written) when a secret field
-carries a value (the error names the keys, never the values), when `secretRef` is invalid, when
-an app-token (browser sign-in) auth method would be used with a secret reference, or when a
-required `is_top_level` field has no value (submitted, or already stored on the connection). A
-non-empty `secretRef` on any other runtime mode is 422.
+Relyance stores no credentials for an `IN_HOST_BYOK` connection. All credential fields of the
+auth method (secret and non-secret) stay in the customer's environment: in a Kubernetes secret,
+or in the AWS Secrets Manager secret that `secretRef` identifies. Relyance stores only the
+top-level field values (`isTopLevel`), the auth method and the secret reference; it ignores
+other non-secret values. `secretRef`: absent or null leaves the stored value unchanged; an empty
+string clears it; any other value must be an AWS Secrets Manager secret ARN
+(`arn:<partition>:secretsmanager:<region>:<account-id>:secret:<name>`, with a region in that
+partition) in the AWS account of the tenant's Outpost deployment. A secret reference is refused
+if the tenant has no enabled Outpost deployment, if the deployment is on GCP ("Secret references
+are available only for Outpost on AWS."), or if the AWS account of the deployment is not known.
+The response is 500 if Relyance cannot read the deployment. The response is 422, and nothing
+changes, if a secret field has a value (the error gives the field keys, never the values), if
+`secretRef` is not valid, if an app-token (browser sign-in) auth method is used with a secret
+reference, or if a required top-level field has no value (in the request, or already stored on
+the connection). For all other runtime modes, a non-empty `secretRef` gives 422.
 
 For `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the
 `auth.secret_path` built against) the tenant's own GCP project rather than the service's
@@ -1624,20 +1625,16 @@ UpdateVendorConnectionV1 Update scalar sub-doc fields on a connection.
 
 Updates one or more scalar sub-doc fields on an existing connection
 (`refreshFrequency`, `startScanFrom`, `dataStorageLocation`, `businessNodeIds`,
-`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`, `runtimeMode`). Only fields
-present in the request body are written, via dotted-path `$set`/`$unset` in one update --
-never a whole-document replace.
+`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`, `runtimeMode`). Only the fields
+in the request body change; all other fields keep their values.
 
-`runtimeMode` (mirrors mgr's `updateIntegrationConnectionRuntimeMode`): the tenant must have a
-deployment for the mode, as mgr's `getSupportedIntegrationConnectionRuntimeModes` decides --
-`IN_HOST`/`IN_HOST_BYOK` need an enabled InHost (`sierra_configuration`), `IN_HOME` an enabled
-InHome (`molokai_configuration`); otherwise 422 and nothing is written. Switching to
-`IN_HOST_BYOK` drops `auth.secret_path` in the same write and then deletes that Relyance-held
-Secret Manager secret (3 attempts): BYOK credentials live only in the customer's environment. If
-the deletion still fails, the mode change stays committed (204), the secret's path is recorded in
-`auth.pending_secret_deletion`, and the next runtime-mode change retries it (and clears the field).
-Switching to any other mode clears `auth.secret_ref`, which only means something for
-`IN_HOST_BYOK`.
+`runtimeMode` sets the connection's runtime mode. `RELYANCE_HOSTED` is always available. For the
+other modes, the tenant must have an enabled deployment: InHost for `IN_HOST` and `IN_HOST_BYOK`,
+InHome for `IN_HOME`. If not, the response is 422 and nothing changes. Switching to
+`IN_HOST_BYOK` deletes the credentials Relyance stored for the connection, because BYOK
+credentials stay only in the customer's environment. If that deletion fails, the mode change
+still applies (204), and Relyance tries the deletion again at the next runtime-mode change.
+Switching to any other mode clears the connection's secret reference (`secretRef`).
 
 When the write includes `refreshFrequency` and/or `startScanFrom`, a best-effort "conductor
 poke" is scheduled off the request path afterward (mirrors mgr's
@@ -1764,16 +1761,16 @@ func (r ApiValidateVendorConnectionAuthV1Request) Execute() (*AuthValidateRespon
 /*
 ValidateVendorConnectionAuthV1 Validate auth-field values without persisting them.
 
-Validates a set of auth-field values against the vendor's auth form without persisting
-anything (`Field.fill()` + `validate()`).
+Validates a set of auth-field values against the vendor's auth form. Nothing is saved.
 
-When the connection's `runtime_mode` is `IN_HOST_BYOK`, every credential field of the auth
-method lives in the customer's own secret, so only `is_top_level` fields (e.g.
-`data_storage_location`) are validated. The result is invalid when a secret field carries a
-value (the error names the keys, never the values), when `secretRef` breaks a secret-reference
-rule (see `PUT .../auth`), or when an app-token (browser sign-in) auth method is combined with a
-secret reference. 500 when the InHost deployment cannot be read to check the reference. Relyance does not test access to the customer's secret. On any other runtime mode a
-non-empty `secretRef` is invalid.
+For an `IN_HOST_BYOK` connection, all credential fields of the auth method are in the
+customer's own secret, so only the top-level fields (`isTopLevel`, for example
+`data_storage_location`) are validated. The result is invalid if a secret field has a value (the
+error gives the field keys, never the values), if `secretRef` does not obey the rules in
+`PUT .../auth`, or if an app-token (browser sign-in) auth method is used with a secret
+reference. Relyance does not test access to the customer's secret. The response is 500 if
+Relyance cannot read the InHost deployment to check the reference. For all other runtime
+modes, a non-empty `secretRef` makes the result invalid.
 
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
 	@param vendorKey
