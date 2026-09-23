@@ -233,7 +233,7 @@ AuthType) runs in the background and updates `auth.status`/`auth.error` on compl
 `IN_HOST_BYOK` connections are not tested live (Relyance does not hold their credentials; the
 scanner reports credential problems on its next scan): the connection is marked
 `AUTH_STATUS_CONNECTED` before the 202 returns. 422 when the auth method is app token (browser
-sign-in) and the connection has a secret reference.
+sign-in) or JWT and the connection has a secret reference.
 
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
 	@param vendorKey
@@ -1233,13 +1233,13 @@ top-level field values (`isTopLevel`), the auth method and the secret reference;
 other non-secret values. `secretRef`: absent or null leaves the stored value unchanged; an empty
 string clears it; any other value must be an AWS Secrets Manager secret ARN
 (`arn:<partition>:secretsmanager:<region>:<account-id>:secret:<name>`, with a region in that
-partition) in the AWS account of the tenant's Outpost deployment. A secret reference is refused
+partition, at most 2048 characters) in the AWS account of the tenant's Outpost deployment. A secret reference is refused
 if the tenant has no enabled Outpost deployment, if the deployment is on GCP ("Secret references
 are available only for Outpost on AWS."), or if the AWS account of the deployment is not known.
 The response is 500 if Relyance cannot read the deployment. The response is 422, and nothing
 changes, if a secret field has a value (the error gives the field keys, never the values), if
-`secretRef` is not valid, if an app-token (browser sign-in) auth method is used with a secret
-reference, or if a required top-level field has no value (in the request, or already stored on
+`secretRef` is not valid, if an app-token (browser sign-in) or JWT auth method is used with a
+secret reference, or if a required top-level field has no value (in the request, or already stored on
 the connection). For all other runtime modes, a non-empty `secretRef` gives 422.
 
 For `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the
@@ -1634,7 +1634,9 @@ InHome for `IN_HOME`. If not, the response is 422 and nothing changes. Switching
 `IN_HOST_BYOK` deletes the credentials Relyance stored for the connection, because BYOK
 credentials stay only in the customer's environment. If that deletion fails, the mode change
 still applies (204), and Relyance tries the deletion again at the next runtime-mode change.
-Switching to any other mode clears the connection's secret reference (`secretRef`).
+Switching to any other mode clears the connection's secret reference (`secretRef`). If another
+request changes the connection's runtime mode or stored credentials at the same time, the
+response is 409 and nothing changes. Send the request again.
 
 When the write includes `refreshFrequency` and/or `startScanFrom`, a best-effort "conductor
 poke" is scheduled off the request path afterward (mirrors mgr's
@@ -1767,7 +1769,7 @@ For an `IN_HOST_BYOK` connection, all credential fields of the auth method are i
 customer's own secret, so only the top-level fields (`isTopLevel`, for example
 `data_storage_location`) are validated. The result is invalid if a secret field has a value (the
 error gives the field keys, never the values), if `secretRef` does not obey the rules in
-`PUT .../auth`, or if an app-token (browser sign-in) auth method is used with a secret
+`PUT .../auth`, or if an app-token (browser sign-in) or JWT auth method is used with a secret
 reference. Relyance does not test access to the customer's secret. The response is 500 if
 Relyance cannot read the InHost deployment to check the reference. For all other runtime
 modes, a non-empty `secretRef` makes the result invalid.
