@@ -11,9 +11,13 @@ import (
 
 // SaveAuth persists auth-field values (204). Secrets land in the server's
 // secret store; non-secret fields in the connection document. The server
-// validates before writing.
+// validates before writing. For InHost BYOK connections only top-level field
+// values and the optional secret_ref are accepted.
 func (c *Client) SaveAuth(ctx context.Context, vendorKey, id string, req AuthSaveRequest) error {
 	body := apiclient.AuthSaveRequest{AuthKey: req.AuthKey, CustomCreds: req.CustomCreds}
+	if req.SecretRef != nil {
+		body.SetSecretRef(*req.SecretRef)
+	}
 	resp, err := c.api.TerraformAPI.SaveVendorConnectionAuthV1(ctx, vendorKey, id).
 		AuthSaveRequest(body).Execute()
 	if err != nil {
@@ -26,6 +30,9 @@ func (c *Client) SaveAuth(ctx context.Context, vendorKey, id string, req AuthSav
 // safe to call at plan time.
 func (c *Client) ValidateAuth(ctx context.Context, vendorKey, id string, req AuthSaveRequest) (*ValidateResult, error) {
 	body := apiclient.AuthValidateRequest{AuthKey: req.AuthKey, CustomCreds: req.CustomCreds}
+	if req.SecretRef != nil {
+		body.SetSecretRef(*req.SecretRef)
+	}
 	out, resp, err := c.api.TerraformAPI.ValidateVendorConnectionAuthV1(ctx, vendorKey, id).
 		AuthValidateRequest(body).Execute()
 	if err != nil {

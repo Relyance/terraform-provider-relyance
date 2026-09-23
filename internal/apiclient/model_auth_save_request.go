@@ -22,6 +22,7 @@ var _ MappedNullable = &AuthSaveRequest{}
 type AuthSaveRequest struct {
 	AuthKey              string                 `json:"authKey"`
 	CustomCreds          map[string]interface{} `json:"customCreds,omitempty"`
+	SecretRef            NullableString         `json:"secret_ref,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -101,6 +102,49 @@ func (o *AuthSaveRequest) SetCustomCreds(v map[string]interface{}) {
 	o.CustomCreds = v
 }
 
+// GetSecretRef returns the SecretRef field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *AuthSaveRequest) GetSecretRef() string {
+	if o == nil || IsNil(o.SecretRef.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.SecretRef.Get()
+}
+
+// GetSecretRefOk returns a tuple with the SecretRef field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *AuthSaveRequest) GetSecretRefOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.SecretRef.Get(), o.SecretRef.IsSet()
+}
+
+// HasSecretRef returns a boolean if a field has been set.
+func (o *AuthSaveRequest) HasSecretRef() bool {
+	if o != nil && o.SecretRef.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetSecretRef gets a reference to the given NullableString and assigns it to the SecretRef field.
+func (o *AuthSaveRequest) SetSecretRef(v string) {
+	o.SecretRef.Set(&v)
+}
+
+// SetSecretRefNil sets the value for SecretRef to be an explicit nil
+func (o *AuthSaveRequest) SetSecretRefNil() {
+	o.SecretRef.Set(nil)
+}
+
+// UnsetSecretRef ensures that no value is present for SecretRef, not even an explicit nil
+func (o *AuthSaveRequest) UnsetSecretRef() {
+	o.SecretRef.Unset()
+}
+
 func (o AuthSaveRequest) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -114,6 +158,9 @@ func (o AuthSaveRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize["authKey"] = o.AuthKey
 	if !IsNil(o.CustomCreds) {
 		toSerialize["customCreds"] = o.CustomCreds
+	}
+	if o.SecretRef.IsSet() {
+		toSerialize["secret_ref"] = o.SecretRef.Get()
 	}
 
 	for key, value := range o.AdditionalProperties {
@@ -160,6 +207,7 @@ func (o *AuthSaveRequest) UnmarshalJSON(data []byte) (err error) {
 	if err = json.Unmarshal(data, &additionalProperties); err == nil {
 		delete(additionalProperties, "authKey")
 		delete(additionalProperties, "customCreds")
+		delete(additionalProperties, "secret_ref")
 		o.AdditionalProperties = additionalProperties
 	}
 

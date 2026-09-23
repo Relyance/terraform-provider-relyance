@@ -1939,6 +1939,18 @@
           "customCreds": {
             "type": "object",
             "title": "Customcreds"
+          },
+          "secret_ref": {
+            "description": "InHost BYOK only: ARN of an AWS Secrets Manager secret in the customer's own AWS account that holds every credential field of the auth method as a JSON object. Omitted leaves the stored reference unchanged; an empty string clears it. Rejected for connections whose `runtime_mode` is not `IN_HOST_BYOK`, for app-token auth methods, and for an ARN in a different AWS account than the tenant's InHost deployment.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret Ref"
           }
         },
         "required": [
@@ -1958,6 +1970,18 @@
           "customCreds": {
             "type": "object",
             "title": "Customcreds"
+          },
+          "secret_ref": {
+            "description": "InHost BYOK only: ARN of the customer's AWS Secrets Manager secret. Checked for format and account only; Relyance never reads the secret.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret Ref"
           }
         },
         "required": [
