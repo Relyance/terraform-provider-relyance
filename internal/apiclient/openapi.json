@@ -877,9 +877,9 @@
               "application/problem+json": {
                 "example": {
                   "type": "about:blank",
-                  "title": "Not Found",
-                  "status": 404,
-                  "detail": "Connection not found",
+                  "title": "Conflict",
+                  "status": 409,
+                  "detail": "The connection was changed by another request. Try again.",
                   "code": "http_error"
                 }
               }
@@ -1273,9 +1273,9 @@
               "application/problem+json": {
                 "example": {
                   "type": "about:blank",
-                  "title": "Not Found",
-                  "status": 404,
-                  "detail": "Connection not found",
+                  "title": "Conflict",
+                  "status": 409,
+                  "detail": "The connection was changed by another request. Try again.",
                   "code": "http_error"
                 }
               }
