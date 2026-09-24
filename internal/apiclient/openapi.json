@@ -501,7 +501,7 @@
       "post": {
         "operationId": "create_vendor_connection_v1",
         "summary": "Create a new connection for a vendor.",
-        "description": "Creates a new connection for a vendor. Allocates the next per-vendor connection id\n(mirrors mgr's monotonic `vendor_connection_next_id` counter) and seeds the\n`vendors.integrations.<id>` sub-doc with `auth: {type: null, status: AUTH_STATUS_NOT_CONNECTED}`.\n\nWhen the vendor's `status` is `Inactive`, an existing never-configured connection with the\nsame `connection_name`/`integrationType` is reused (its id is returned) instead of creating a\nduplicate. Otherwise the new connection is auto-associated with the tenant's own business\nentity (`business_node_ids`) if one exists, and auto-selects `kinds` the vendor only supports\none of, plus `INTEGRATION_KIND_PROPERTY_INSPECTION`/`INTEGRATION_KIND_ASSETS_DISCOVERY` when\nthe vendor supports them (mirrors mgr's `create_connection`).\n\nReturns 201 with the created connection resource (the sub-doc as stored, including `id`) and\na `Location` header pointing at `GET .../connections/v1/{vendor_key}/{connection_id}`.\n\nSee `docs/integration-setup-example.md` for a full worked example (catalog read through\ncreate/validate/save/connect/poll/kind-selection) with real request/response JSON.",
+        "description": "Creates a new connection for a vendor. Allocates the next per-vendor connection id\n(mirrors mgr's monotonic `vendor_connection_next_id` counter) and seeds the\n`vendors.integrations.<id>` sub-doc with `auth: {type: null, status: AUTH_STATUS_NOT_CONNECTED}`.\n\nWhen the vendor's `status` is `Inactive`, an existing never-configured connection with the\nsame `connection_name`/`integrationType` is reused (its id is returned) instead of creating a\nduplicate. Otherwise the new connection is auto-associated with the tenant's own business\nentity (`business_node_ids`) if one exists, and auto-selects `kinds` the vendor only supports\none of, plus `INTEGRATION_KIND_PROPERTY_INSPECTION` and the always-enabled kinds\n(`INTEGRATION_KIND_ASSETS_DISCOVERY`, `INTEGRATION_KIND_AI_DISCOVERY`) when the vendor supports\nthem (mirrors mgr's `create_connection`).\n\nReturns 201 with the created connection resource (the sub-doc as stored, including `id`) and\na `Location` header pointing at `GET .../connections/v1/{vendor_key}/{connection_id}`.\n\nSee `docs/integration-setup-example.md` for a full worked example (catalog read through\ncreate/validate/save/connect/poll/kind-selection) with real request/response JSON.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -628,7 +628,7 @@
       "get": {
         "operationId": "get_vendor_connection_v1",
         "summary": "Get connection detail, including masked auth configs and kind configs.",
-        "description": "Fetches one connection's full detail: the raw connection sub-doc, its auth field\nconfigs (secret-masked per `get_vendor_connection_auth_configs`'s own masking rules --\nsupport users without `relyanceSecretAccess`, or the `hide-integration-secrets` tenant\nflag), and its kind field configs.",
+        "description": "Fetches one connection's full detail: the raw connection sub-doc, its auth field\nconfigs (secret-masked per `get_vendor_connection_auth_configs`'s own masking rules --\nsupport users without `relyanceSecretAccess`, or the `hide-integration-secrets` tenant\nflag), and its kind field configs.\n\nEvery auth custom field has `isTopLevel`. For an `IN_HOST_BYOK` connection, only the fields with\n`isTopLevel` true are entered in Relyance; all other credential fields are in the customer's own\nsecret. When the connection has a secret reference, the response gives it in `auth.secret_ref`:\nthe ARN of the customer's secret, not a secret value.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -752,7 +752,7 @@
       "patch": {
         "operationId": "update_vendor_connection_v1",
         "summary": "Update scalar sub-doc fields on a connection.",
-        "description": "Updates one or more scalar sub-doc fields on an existing connection\n(`refreshFrequency`, `startScanFrom`, `dataStorageLocation`, `businessNodeIds`,\n`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`). Only fields present in\nthe request body are written, via a dotted-path `$set` -- never a whole-document replace.\n\nWhen the write includes `refreshFrequency` and/or `startScanFrom`, a best-effort \"conductor\npoke\" is scheduled off the request path afterward (mirrors mgr's\n`connSetRefreshFrequency`/`connSetStartScanFrom`) so the scan scheduler picks up the new\ncadence without waiting for a restart. The poke never blocks or fails the response --\nscheduling or publishing it is not on the request's critical path.\n\nReturns 204 with no body, including when the request body has no recognized fields to write\n(a no-op). Poll `GET .../{connection_id}` to observe the updated resource.",
+        "description": "Updates one or more scalar sub-doc fields on an existing connection\n(`refreshFrequency`, `startScanFrom`, `dataStorageLocation`, `businessNodeIds`,\n`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`, `runtimeMode`). Only the fields\nin the request body change; all other fields keep their values.\n\n`runtimeMode` sets the connection's runtime mode. `RELYANCE_HOSTED` is always available. For the\nother modes, the tenant must have an enabled deployment: InHost for `IN_HOST` and `IN_HOST_BYOK`,\nInHome for `IN_HOME`. If not, the response is 422 and nothing changes. Switching to\n`IN_HOST_BYOK` deletes the credentials Relyance stored for the connection, because BYOK\ncredentials stay only in the customer's environment. If that deletion fails, the mode change\nstill applies (204), and Relyance tries the deletion again at the next runtime-mode change. If\ncredential deletion is turned off, Relyance does not delete the credentials and does not try again.\nSwitching to any other mode clears the connection's secret reference (`secretRef`). A connection\nthat leaves `IN_HOST_BYOK` has no credentials that Relyance can use, so its `auth.status` becomes\n`AUTH_STATUS_NOT_CONNECTED`, as after a disconnect. Save its credentials and connect it again. If another\nrequest changes the connection's runtime mode or stored credentials at the same time, the\nresponse is 409 and nothing changes. Send the request again.\n\nWhen the write includes `refreshFrequency` and/or `startScanFrom`, a best-effort \"conductor\npoke\" is scheduled off the request path afterward (mirrors mgr's\n`connSetRefreshFrequency`/`connSetStartScanFrom`) so the scan scheduler picks up the new\ncadence without waiting for a restart. The poke never blocks or fails the response --\nscheduling or publishing it is not on the request's critical path.\n\nReturns 204 with no body, including when the request body has no recognized fields to write\n(a no-op). Poll `GET .../{connection_id}` to observe the updated resource.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -866,6 +866,20 @@
                   "title": "Not Found",
                   "status": 404,
                   "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Conflict",
+                  "status": 409,
+                  "detail": "The connection was changed by another request. Try again.",
                   "code": "http_error"
                 }
               }
@@ -998,7 +1012,7 @@
       "post": {
         "operationId": "validate_vendor_connection_auth_v1",
         "summary": "Validate auth-field values without persisting them.",
-        "description": "Validates a set of auth-field values against the vendor's auth form without persisting\nanything (`Field.fill()` + `validate()`, or `validate_byok()` when the connection's\n`runtime_mode` is `IN_HOST_BYOK`, which skips secret-field validation).",
+        "description": "Validates a set of auth-field values against the vendor's auth form. Nothing is saved.\n\nFor an `IN_HOST_BYOK` connection, all credential fields of the auth method are in the\ncustomer's own secret, so only the top-level fields (`isTopLevel`, for example\n`data_storage_location`) are validated. The result is invalid if a secret field has a value (the\nerror gives the field keys, never the values), if `secretRef` does not obey the rules in\n`PUT .../auth`, or if an app-token (browser sign-in) or JWT auth method is used with a secret\nreference. Relyance does not test access to the customer's secret. The response is 500 if\nRelyance cannot read the InHost deployment to check the reference. For all other runtime\nmodes, a non-empty `secretRef` makes the result invalid.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -1134,7 +1148,7 @@
       "put": {
         "operationId": "save_vendor_connection_auth_v1",
         "summary": "Save auth-field values (is_top_level split; secrets to GCP Secret Manager).",
-        "description": "Saves auth-field values for a connection. Fields flagged `is_top_level` on the vendor's\nauth form are written as flat scalars on the connection sub-doc; every other field is\nstored as a GCP Secret Manager secret. No-op when the connection's `runtime_mode` is\n`IN_HOST_BYOK` -- BYOK connections never have server-side secrets.\n\nFor `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the\n`auth.secret_path` built against) the tenant's own GCP project rather than the service's\ndefault project. Every save also sets `auth.updated_at` (epoch seconds); when secret fields\nwere saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 digest of the\nsaved secret fields only, letting a future Terraform provider detect credential drift\nwithout ever reading a secret value back.\n\nReturns 204 with no body (including the BYOK no-op case).",
+        "description": "Saves auth-field values for a connection. Fields flagged `is_top_level` on the vendor's\nauth form are written as flat scalars on the connection sub-doc; every other field is\nstored as a GCP Secret Manager secret.\n\nRelyance stores no credentials for an `IN_HOST_BYOK` connection. All credential fields of the\nauth method (secret and non-secret) stay in the customer's environment: in a Kubernetes secret,\nor in the AWS Secrets Manager secret that `secretRef` identifies. Relyance stores only the\ntop-level field values (`isTopLevel`), the auth method and the secret reference; it ignores\nother non-secret values. `secretRef`: absent or null leaves the stored value unchanged; an empty\nstring clears it; any other value must be an AWS Secrets Manager secret ARN\n(`arn:<partition>:secretsmanager:<region>:<account-id>:secret:<name>`, with a region in that\npartition, at most 2048 characters) in the AWS account of the tenant's Outpost deployment. A secret reference is refused\nif the tenant has no enabled Outpost deployment, if the deployment is on GCP (\"Secret references\nare available only for Outpost on AWS.\"), or if the AWS account of the deployment is not known.\nThe response is 500 if Relyance cannot read the deployment. The response is 422, and nothing\nchanges, if a secret field has a value (the error gives the field keys, never the values), if\n`secretRef` is not valid, if an app-token (browser sign-in) or JWT auth method is used with a\nsecret reference, or if a required top-level field has no value (in the request, or already stored on\nthe connection). For all other runtime modes, a non-empty `secretRef` gives 422.\n\nFor `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the\n`auth.secret_path` built against) the tenant's own GCP project rather than the service's\ndefault project. Every save also sets `auth.updated_at` (epoch seconds); when secret fields\nwere saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 digest of the\nsaved secret fields only, letting a future Terraform provider detect credential drift\nwithout ever reading a secret value back.\n\nIf another request changes the connection's runtime mode or stored credentials at the same time,\nthe response is 409 and nothing changes. Examine the runtime mode and send the request again.\n\nReturns 204 with no body.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -1248,6 +1262,20 @@
                   "title": "Not Found",
                   "status": 404,
                   "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Conflict",
+                  "status": 409,
+                  "detail": "The connection was changed by another request. Try again.",
                   "code": "http_error"
                 }
               }
@@ -1546,7 +1574,7 @@
       "put": {
         "operationId": "select_vendor_connection_kind_v1",
         "summary": "Select or deselect an IntegrationKind on a connection.",
-        "description": "Selects or deselects an `IntegrationKind` on a connection (mirrors mgr's `connSetCheckbox`\nmutation, which takes the same single `selected: bool` argument). Selecting a kind for the\nfirst time creates its `kinds.<kind>` sub-doc (`{isSelected, customFields: []}`); selecting\none that already exists only flips its `isSelected` flag, leaving any saved `customFields`\nin place. `INTEGRATION_KIND_ASSETS_DISCOVERY` is always forced to selected regardless of the\nrequest body -- it's always enabled and hidden from the UI. Once a kind has a `kinds.<kind>`\nentry (selected or not), `PUT .../kinds/{kind}` can save parameters for it.\n\nReturns 204 with no body.",
+        "description": "Selects or deselects an `IntegrationKind` on a connection (mirrors mgr's `connSetCheckbox`\nmutation, which takes the same single `selected: bool` argument). Selecting a kind for the\nfirst time creates its `kinds.<kind>` sub-doc (`{isSelected, customFields: []}`); selecting\none that already exists only flips its `isSelected` flag, leaving any saved `customFields`\nin place. `INTEGRATION_KIND_ASSETS_DISCOVERY` and `INTEGRATION_KIND_AI_DISCOVERY` are always\nforced to selected regardless of the request body -- they're always enabled and hidden from\nthe UI. Once a kind has a `kinds.<kind>`\nentry (selected or not), `PUT .../kinds/{kind}` can save parameters for it.\n\nReturns 204 with no body.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -1684,7 +1712,7 @@
       "post": {
         "operationId": "connect_vendor_connection_v1",
         "summary": "Kick off a live connect/test attempt (async; poll GET for the result).",
-        "description": "Kicks off a live connect/test attempt for a connection and returns 202 immediately with a\nmonitor body `{\"id\", \"status\": \"connecting\"}`; the actual vendor-API call (dispatched by\nAuthType) runs in the background and updates `auth.status`/`auth.error` on completion. Poll\n`GET .../connections/{connection_id}` to observe the result.",
+        "description": "Kicks off a live connect/test attempt for a connection and returns 202 immediately with a\nmonitor body `{\"id\", \"status\": \"connecting\"}`; the actual vendor-API call (dispatched by\nAuthType) runs in the background and updates `auth.status`/`auth.error` on completion. Poll\n`GET .../connections/{connection_id}` to observe the result.\n\n`IN_HOST_BYOK` connections are not tested live (Relyance does not hold their credentials; the\nscanner reports credential problems on its next scan): the connection is marked\n`AUTH_STATUS_CONNECTED` before the 202 returns. 422 when the auth method is app token (browser\nsign-in) or JWT and the connection has a secret reference.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -1939,6 +1967,18 @@
           "customCreds": {
             "type": "object",
             "title": "Customcreds"
+          },
+          "secretRef": {
+            "description": "IN_HOST_BYOK connections only. An AWS Secrets Manager secret ARN in the AWS account of the tenant's Outpost deployment (arn:aws:secretsmanager:<region>:<account-id>:secret:<name>). The secret holds all credential fields of the auth method. Absent or null leaves it unchanged; an empty string clears it (the scanner then reads the Kubernetes secret). The ARN identifies the secret; it is not a secret value.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secretref"
           }
         },
         "required": [
@@ -1958,6 +1998,18 @@
           "customCreds": {
             "type": "object",
             "title": "Customcreds"
+          },
+          "secretRef": {
+            "description": "IN_HOST_BYOK connections only. An AWS Secrets Manager secret ARN in the AWS account of the tenant's Outpost deployment (arn:aws:secretsmanager:<region>:<account-id>:secret:<name>). The secret holds all credential fields of the auth method. Absent or null leaves it unchanged; an empty string clears it (the scanner then reads the Kubernetes secret). The ARN identifies the secret; it is not a secret value.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secretref"
           }
         },
         "required": [
@@ -2402,6 +2454,24 @@
               }
             ],
             "title": "Relyancesecretaccess"
+          },
+          "runtimeMode": {
+            "description": "Sets the connection's runtime mode. The tenant must have a deployment for the mode (InHost for IN_HOST and IN_HOST_BYOK, InHome for IN_HOME); otherwise 422. Switching to IN_HOST_BYOK deletes the credentials Relyance stored for the connection; switching away clears secretRef.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "RELYANCE_HOSTED",
+                  "IN_HOST",
+                  "IN_HOST_BYOK",
+                  "IN_HOME"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtimemode"
           }
         },
         "additionalProperties": false,

@@ -39,6 +39,8 @@ type model struct {
 	IntegrationType types.String `tfsdk:"integration_type"`
 	AuthStatus      types.String `tfsdk:"auth_status"`
 	AuthType        types.String `tfsdk:"auth_type"`
+	RuntimeMode     types.String `tfsdk:"runtime_mode"`
+	SecretRef       types.String `tfsdk:"secret_ref"`
 }
 
 func (d *connDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -57,6 +59,8 @@ func (d *connDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 			"integration_type": schema.StringAttribute{Computed: true, Description: "Integration type."},
 			"auth_status":      schema.StringAttribute{Computed: true, Description: "Live credential status (e.g. AUTH_STATUS_CONNECTED)."},
 			"auth_type":        schema.StringAttribute{Computed: true, Description: "Configured authentication method."},
+			"runtime_mode":     schema.StringAttribute{Computed: true, Description: "Where the connection's scanner runs and where its credentials live (RELYANCE_HOSTED, IN_HOST, IN_HOME or IN_HOST_BYOK)."},
+			"secret_ref":       schema.StringAttribute{Computed: true, Description: "InHost BYOK only: ARN of the AWS Secrets Manager secret that holds the connection's credentials. Null when not set."},
 		},
 	}
 }
@@ -104,6 +108,12 @@ func (d *connDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	} else {
 		out.AuthStatus = types.StringNull()
 		out.AuthType = types.StringNull()
+	}
+	out.RuntimeMode = types.StringValue(detail.RuntimeMode())
+	if ref, ok := detail.SecretRef(); ok {
+		out.SecretRef = types.StringValue(ref)
+	} else {
+		out.SecretRef = types.StringNull()
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &out)...)
 }

@@ -109,6 +109,9 @@ func scalarUpdateToAPI(req ScalarUpdateRequest) apiclient.ScalarUpdateRequest {
 	if req.RelyanceSecretAccess != nil {
 		b.SetRelyanceSecretAccess(*req.RelyanceSecretAccess)
 	}
+	if req.RuntimeMode != nil {
+		b.SetRuntimeMode(*req.RuntimeMode)
+	}
 	return b
 }
 

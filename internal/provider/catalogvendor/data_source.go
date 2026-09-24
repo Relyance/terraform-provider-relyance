@@ -37,6 +37,7 @@ type customFieldModel struct {
 	DefaultValue types.String `tfsdk:"default_value"`
 	IsSecret     types.Bool   `tfsdk:"is_secret"`
 	FieldType    types.String `tfsdk:"field_type"`
+	IsTopLevel   types.Bool   `tfsdk:"is_top_level"`
 }
 
 type authMethodModel struct {
@@ -87,6 +88,7 @@ func (d *vendorDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 									"default_value": schema.StringAttribute{Computed: true, Description: "Server-side default value."},
 									"is_secret":     schema.BoolAttribute{Computed: true, Description: "True → this field belongs in auth.secrets (write-only), never auth.params."},
 									"field_type":    schema.StringAttribute{Computed: true, Description: "Field type hint (e.g. FIELD_TYPE_LOCATION_SELECT)."},
+									"is_top_level":  schema.BoolAttribute{Computed: true, Description: "True → the server stores this field as a plain value on the connection (e.g. data_storage_location). On an InHost BYOK connection only these fields go in auth.params; every other field goes in the customer's secret."},
 								},
 							},
 						},
@@ -148,6 +150,7 @@ func (d *vendorDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 				DefaultValue: types.StringValue(f.DefaultValue),
 				IsSecret:     types.BoolValue(f.IsThisSecret),
 				FieldType:    types.StringValue(f.FieldType),
+				IsTopLevel:   types.BoolValue(f.TopLevel()),
 			})
 		}
 		out.AuthMethods = append(out.AuthMethods, acm)

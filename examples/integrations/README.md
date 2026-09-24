@@ -12,6 +12,7 @@ Runnable examples for common integration types. Every integration uses the same
 | [gcp_storage_inventory.tf](./gcp_storage_inventory.tf) | `gcloud_storage` | `service-account-inventory-reports` | GCS Inventory Reports scan |
 | [vendor_api_key_jira.tf](./vendor_api_key_jira.tf) | `atlassian_jira` | `api-key` | Third-party SaaS via API key |
 | [custom_api_key.tf](./custom_api_key.tf) | `relyance_customapiimport` | `api-key` | Arbitrary third-party API via API key |
+| [vendor_api_key_jira_inhost_byok_secrets_manager.tf](./vendor_api_key_jira_inhost_byok_secrets_manager.tf) | `atlassian_jira` | `api-key` | InHost BYOK: credentials in your AWS Secrets Manager (`secret_ref`) |
 
 ## The pattern
 

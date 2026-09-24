@@ -52,5 +52,6 @@ Read-Only:
 - `default_value` (String) Server-side default value.
 - `field_type` (String) Field type hint (e.g. FIELD_TYPE_LOCATION_SELECT).
 - `is_secret` (Boolean) True → this field belongs in auth.secrets (write-only), never auth.params.
+- `is_top_level` (Boolean) True → the server stores this field as a plain value on the connection (e.g. data_storage_location). On an InHost BYOK connection only these fields go in auth.params; every other field goes in the customer's secret.
 - `key` (String) Field key used in auth.params / auth.secrets_wo.
 - `name` (String) Display name.

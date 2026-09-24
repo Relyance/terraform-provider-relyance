@@ -14,11 +14,19 @@ import (
 
 // fakeService records calls and serves canned responses.
 type fakeService struct {
-	calls     []string
-	detail    *client.ConnectionDetail
-	created   string
-	getErr    error
-	vendorErr error
+	calls        []string
+	detail       *client.ConnectionDetail
+	created      string
+	getErr       error
+	vendorErr    error
+	vendor       *client.Vendor
+	saveReqs     []client.AuthSaveRequest
+	validateReqs []client.AuthSaveRequest
+	// validateResult, when set, is what ValidateAuth returns.
+	validateResult *client.ValidateResult
+	scalarReqs     []client.ScalarUpdateRequest
+	scalarErr      error
+	saveErr        error
 }
 
 func (f *fakeService) Create(_ context.Context, vendorKey string, req client.CreateConnectionRequest) (string, error) {
@@ -34,9 +42,10 @@ func (f *fakeService) Get(_ context.Context, vendorKey, id string) (*client.Conn
 	return f.detail, nil
 }
 
-func (f *fakeService) UpdateScalars(_ context.Context, vendorKey, id string, _ client.ScalarUpdateRequest) error {
+func (f *fakeService) UpdateScalars(_ context.Context, vendorKey, id string, req client.ScalarUpdateRequest) error {
 	f.calls = append(f.calls, fmt.Sprintf("patch %s/%s", vendorKey, id))
-	return nil
+	f.scalarReqs = append(f.scalarReqs, req)
+	return f.scalarErr
 }
 
 func (f *fakeService) Delete(_ context.Context, vendorKey, id string) error {
@@ -46,11 +55,26 @@ func (f *fakeService) Delete(_ context.Context, vendorKey, id string) error {
 
 func (f *fakeService) SaveAuth(_ context.Context, vendorKey, id string, req client.AuthSaveRequest) error {
 	f.calls = append(f.calls, fmt.Sprintf("saveauth %s/%s %s", vendorKey, id, req.AuthKey))
-	return nil
+	f.saveReqs = append(f.saveReqs, req)
+	return f.saveErr
 }
 
 func (f *fakeService) ValidateAuth(_ context.Context, vendorKey, id string, req client.AuthSaveRequest) (*client.ValidateResult, error) {
 	f.calls = append(f.calls, fmt.Sprintf("validate %s/%s %s", vendorKey, id, req.AuthKey))
+	f.validateReqs = append(f.validateReqs, req)
+	if f.validateResult != nil {
+		return f.validateResult, nil
+	}
+	// Like the server: auth is validated against the connection's stored
+	// runtime_mode, and a secretRef is refused unless that mode is BYOK.
+	stored := client.RuntimeModeRelyanceHosted
+	if f.detail != nil {
+		stored = f.detail.RuntimeMode()
+	}
+	if req.SecretRef != nil && *req.SecretRef != "" && stored != client.RuntimeModeInHostBYOK {
+		msg := "A secret reference can only be set on an InHost BYOK connection. Set the runtime mode to IN_HOST_BYOK first."
+		return &client.ValidateResult{IsValid: false, Error: &msg}, nil
+	}
 	return &client.ValidateResult{IsValid: true}, nil
 }
 
@@ -73,6 +97,9 @@ func (f *fakeService) GetVendor(_ context.Context, vendorKey string) (*client.Ve
 	f.calls = append(f.calls, fmt.Sprintf("vendor %s", vendorKey))
 	if f.vendorErr != nil {
 		return nil, f.vendorErr
+	}
+	if f.vendor != nil {
+		return f.vendor, nil
 	}
 	return &client.Vendor{VendorKey: vendorKey}, nil
 }
