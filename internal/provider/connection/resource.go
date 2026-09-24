@@ -691,6 +691,17 @@ func (r *connectionResource) validateAuthPlan(
 		return
 	}
 	if !result.IsValid {
+		// On an InHost BYOK connection the server reports its secret_ref rules
+		// (format, the InHost deployment's AWS account and cloud, an auth method
+		// that cannot use a reference) as an error with no field results; its
+		// BYOK field validation always reports per field. Put them on secret_ref,
+		// as the apply's auth save does, so the plan points at the value to fix.
+		if byok && knownString(plan.SecretRef) && plan.SecretRef.ValueString() != "" &&
+			len(result.FieldResults) == 0 && result.Error != nil && *result.Error != "" {
+			resp.Diagnostics.AddAttributeError(path.Root("secret_ref"), "Relyance rejected secret_ref",
+				*result.Error+secretRefRejectedHint)
+			return
+		}
 		detail := "credential validation failed"
 		if result.Error != nil && *result.Error != "" {
 			detail = *result.Error
@@ -744,9 +755,7 @@ func (r *connectionResource) saveAuth(ctx context.Context, config tfsdk.Config, 
 	err := r.svc.SaveAuth(ctx, plan.Vendor.ValueString(), plan.ID.ValueString(), req)
 	if err != nil {
 		if secretRef != nil && *secretRef != "" && isUnprocessable(err) {
-			diags.AddAttributeError(path.Root("secret_ref"), "Relyance rejected secret_ref",
-				err.Error()+"\n\nsecret_ref must name a secret in the AWS account of the tenant's InHost "+
-					"deployment, and secret references are available only for Outpost on AWS.")
+			diags.AddAttributeError(path.Root("secret_ref"), "Relyance rejected secret_ref", err.Error()+secretRefRejectedHint)
 			return false
 		}
 		detail := err.Error()
@@ -840,6 +849,10 @@ func isUnprocessable(err error) bool {
 func isConflict(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "HTTP 409")
 }
+
+// secretRefRejectedHint follows the server's reason when it refuses secret_ref.
+const secretRefRejectedHint = "\n\nsecret_ref must name a secret in the AWS account of the tenant's InHost " +
+	"deployment, and secret references are available only for Outpost on AWS."
 
 const conflictHint = "\n\nAnother request changed this connection's runtime mode or credentials at the " +
 	"same time, and Relyance changed nothing. Run terraform apply again."

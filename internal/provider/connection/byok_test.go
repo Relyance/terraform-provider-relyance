@@ -635,6 +635,86 @@ func TestModifyPlanWiring(t *testing.T) {
 	})
 }
 
+// The server's validate endpoint reports its secret_ref rules on a BYOK
+// connection as an error with no field results. The plan must put them on
+// secret_ref (as the apply's auth save does), not on the auth block.
+func TestModifyPlanServerSecretRefRuleIsOnSecretRef(t *testing.T) {
+	h := newHarness(t)
+	vendor := &client.Vendor{VendorKey: "atlassian_jira", AuthConfigs: []client.AuthConfig{{
+		Slug: "api-key", Key: "AUTH_TYPE_CUSTOM",
+		CustomFields: []client.CustomField{
+			{Key: "data_storage_location", IsTopLevel: true},
+			{Key: "ORG_ID", IsThisSecret: true},
+			{Key: "API_KEY", IsThisSecret: true},
+		},
+	}}}
+	const accountMsg = "The secret must be in the AWS account of your InHost deployment (123456789012 (aws)); " +
+		"this ARN is in account 999999999999 (aws)."
+	msg := accountMsg
+	params := map[string]string{"data_storage_location": "us"}
+
+	run := func(t *testing.T, mode string, ref *string, result *client.ValidateResult) diag.Diagnostics {
+		t.Helper()
+		f := &fakeService{vendor: vendor, validateResult: result,
+			detail: &client.ConnectionDetail{Connection: map[string]any{"runtime_mode": mode}}}
+		r := &connectionResource{svc: f, validateOnPlan: true}
+		state := h.obj(h.stateVals(mode, ref, true))
+		planVals := h.stateVals(mode, ref, false)
+		planVals["auth"] = h.authVal(params, nil)
+		cfgVals := map[string]tftypes.Value{"auth": h.authVal(params, nil), "runtime_mode": str(mode)}
+		if ref != nil {
+			cfgVals["secret_ref"] = str(*ref)
+		}
+		resp := h.modifyPlan(r, h.obj(cfgVals), h.obj(planVals), state)
+		if len(f.validateReqs) != 1 {
+			t.Fatalf("expected one server validation, got %d", len(f.validateReqs))
+		}
+		return resp.Diagnostics
+	}
+	errorsAt := func(d diag.Diagnostics, p path.Path) []diag.Diagnostic {
+		var out []diag.Diagnostic
+		for _, e := range d.Errors() {
+			if wp, ok := e.(diag.DiagnosticWithPath); ok && wp.Path().Equal(p) {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+
+	t.Run("BYOK rule error goes to secret_ref with the server's text", func(t *testing.T) {
+		d := run(t, client.RuntimeModeInHostBYOK, ptr(testARN), &client.ValidateResult{IsValid: false, Error: &msg})
+		got := errorsAt(d, path.Root("secret_ref"))
+		if len(got) != 1 || got[0].Summary() != "Relyance rejected secret_ref" || !strings.Contains(got[0].Detail(), accountMsg) {
+			t.Fatalf("diags = %v", d)
+		}
+		if len(errorsAt(d, path.Root("auth"))) != 0 {
+			t.Fatalf("the rule must not also be reported on auth: %v", d)
+		}
+	})
+
+	t.Run("field errors stay on auth", func(t *testing.T) {
+		d := run(t, client.RuntimeModeInHostBYOK, ptr(testARN), &client.ValidateResult{IsValid: false,
+			FieldResults: []map[string]any{{"field": "data_storage_location", "errors": []any{"invalid"}}}})
+		if len(errorsAt(d, path.Root("auth"))) != 1 || len(errorsAt(d, path.Root("secret_ref"))) != 0 {
+			t.Fatalf("diags = %v", d)
+		}
+	})
+
+	t.Run("BYOK without secret_ref stays on auth", func(t *testing.T) {
+		d := run(t, client.RuntimeModeInHostBYOK, nil, &client.ValidateResult{IsValid: false, Error: &msg})
+		if len(errorsAt(d, path.Root("auth"))) != 1 || len(errorsAt(d, path.Root("secret_ref"))) != 0 {
+			t.Fatalf("diags = %v", d)
+		}
+	})
+
+	t.Run("hosted errors stay on auth", func(t *testing.T) {
+		d := run(t, client.RuntimeModeRelyanceHosted, nil, &client.ValidateResult{IsValid: false, Error: &msg})
+		if len(errorsAt(d, path.Root("auth"))) != 1 || len(errorsAt(d, path.Root("secret_ref"))) != 0 {
+			t.Fatalf("diags = %v", d)
+		}
+	})
+}
+
 func TestUpdateClearsRemovedSecretRef(t *testing.T) {
 	h := newHarness(t)
 	f := &fakeService{detail: &client.ConnectionDetail{Connection: map[string]any{

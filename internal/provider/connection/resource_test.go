@@ -22,9 +22,11 @@ type fakeService struct {
 	vendor       *client.Vendor
 	saveReqs     []client.AuthSaveRequest
 	validateReqs []client.AuthSaveRequest
-	scalarReqs   []client.ScalarUpdateRequest
-	scalarErr    error
-	saveErr      error
+	// validateResult, when set, is what ValidateAuth returns.
+	validateResult *client.ValidateResult
+	scalarReqs     []client.ScalarUpdateRequest
+	scalarErr      error
+	saveErr        error
 }
 
 func (f *fakeService) Create(_ context.Context, vendorKey string, req client.CreateConnectionRequest) (string, error) {
@@ -60,6 +62,9 @@ func (f *fakeService) SaveAuth(_ context.Context, vendorKey, id string, req clie
 func (f *fakeService) ValidateAuth(_ context.Context, vendorKey, id string, req client.AuthSaveRequest) (*client.ValidateResult, error) {
 	f.calls = append(f.calls, fmt.Sprintf("validate %s/%s %s", vendorKey, id, req.AuthKey))
 	f.validateReqs = append(f.validateReqs, req)
+	if f.validateResult != nil {
+		return f.validateResult, nil
+	}
 	// Like the server: auth is validated against the connection's stored
 	// runtime_mode, and a secretRef is refused unless that mode is BYOK.
 	stored := client.RuntimeModeRelyanceHosted
