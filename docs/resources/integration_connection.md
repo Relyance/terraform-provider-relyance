@@ -86,7 +86,7 @@ Required:
 Optional:
 
 - `params` (Map of String) Non-secret auth fields (stored in state, fully diffable).
-- `secrets_wo` (Map of String, Sensitive) Secret auth fields. Write-only: never stored in state or plan files. Because write-only values cannot be diffed, changing a secret value alone produces NO plan change — bump secrets_wo_version to re-send rotated secrets.
+- `secrets_wo` (Map of String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Secret auth fields. Write-only: never stored in state or plan files. Because write-only values cannot be diffed, changing a secret value alone produces NO plan change — bump secrets_wo_version to re-send rotated secrets.
 - `secrets_wo_version` (Number) Rotation trigger for secrets_wo: bump this integer whenever secret values change so Terraform re-sends them.
 
 Read-Only:
