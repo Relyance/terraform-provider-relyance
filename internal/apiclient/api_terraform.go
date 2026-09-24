@@ -1634,7 +1634,9 @@ InHome for `IN_HOME`. If not, the response is 422 and nothing changes. Switching
 `IN_HOST_BYOK` deletes the credentials Relyance stored for the connection, because BYOK
 credentials stay only in the customer's environment. If that deletion fails, the mode change
 still applies (204), and Relyance tries the deletion again at the next runtime-mode change.
-Switching to any other mode clears the connection's secret reference (`secretRef`). If another
+Switching to any other mode clears the connection's secret reference (`secretRef`). A connection
+that leaves `IN_HOST_BYOK` has no credentials that Relyance can use, so its `auth.status` becomes
+`AUTH_STATUS_NOT_CONNECTED`, as after a disconnect. Save its credentials and connect it again. If another
 request changes the connection's runtime mode or stored credentials at the same time, the
 response is 409 and nothing changes. Send the request again.
 

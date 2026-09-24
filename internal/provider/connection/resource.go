@@ -196,7 +196,9 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					"IN_HOST, IN_HOST_BYOK or IN_HOME. The tenant needs an enabled deployment for the mode (InHost " +
 					"for IN_HOST and IN_HOST_BYOK, InHome for IN_HOME). When unset, Terraform does not manage it and " +
 					"reports the current value (new connections start as RELYANCE_HOSTED). Switching to IN_HOST_BYOK " +
-					"deletes any credentials Relyance holds for the connection; switching away from it clears secret_ref.",
+					"deletes any credentials Relyance holds for the connection. Switching away from it clears secret_ref " +
+					"and disconnects the connection until credentials are saved; the apply saves the configured auth " +
+					"right after the switch.",
 				Validators: []validator.String{stringvalidator.OneOf(client.RuntimeModes...)},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
