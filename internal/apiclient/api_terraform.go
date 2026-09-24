@@ -1249,6 +1249,9 @@ were saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 dige
 saved secret fields only, letting a future Terraform provider detect credential drift
 without ever reading a secret value back.
 
+If another request changes the connection's runtime mode or stored credentials at the same time,
+the response is 409 and nothing changes. Examine the runtime mode and send the request again.
+
 Returns 204 with no body.
 
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
@@ -1633,7 +1636,8 @@ other modes, the tenant must have an enabled deployment: InHost for `IN_HOST` an
 InHome for `IN_HOME`. If not, the response is 422 and nothing changes. Switching to
 `IN_HOST_BYOK` deletes the credentials Relyance stored for the connection, because BYOK
 credentials stay only in the customer's environment. If that deletion fails, the mode change
-still applies (204), and Relyance tries the deletion again at the next runtime-mode change.
+still applies (204), and Relyance tries the deletion again at the next runtime-mode change. If
+credential deletion is turned off, Relyance does not delete the credentials and does not try again.
 Switching to any other mode clears the connection's secret reference (`secretRef`). A connection
 that leaves `IN_HOST_BYOK` has no credentials that Relyance can use, so its `auth.status` becomes
 `AUTH_STATUS_NOT_CONNECTED`, as after a disconnect. Save its credentials and connect it again. If another

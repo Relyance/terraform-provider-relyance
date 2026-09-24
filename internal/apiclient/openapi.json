@@ -752,7 +752,7 @@
       "patch": {
         "operationId": "update_vendor_connection_v1",
         "summary": "Update scalar sub-doc fields on a connection.",
-        "description": "Updates one or more scalar sub-doc fields on an existing connection\n(`refreshFrequency`, `startScanFrom`, `dataStorageLocation`, `businessNodeIds`,\n`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`, `runtimeMode`). Only the fields\nin the request body change; all other fields keep their values.\n\n`runtimeMode` sets the connection's runtime mode. `RELYANCE_HOSTED` is always available. For the\nother modes, the tenant must have an enabled deployment: InHost for `IN_HOST` and `IN_HOST_BYOK`,\nInHome for `IN_HOME`. If not, the response is 422 and nothing changes. Switching to\n`IN_HOST_BYOK` deletes the credentials Relyance stored for the connection, because BYOK\ncredentials stay only in the customer's environment. If that deletion fails, the mode change\nstill applies (204), and Relyance tries the deletion again at the next runtime-mode change.\nSwitching to any other mode clears the connection's secret reference (`secretRef`). A connection\nthat leaves `IN_HOST_BYOK` has no credentials that Relyance can use, so its `auth.status` becomes\n`AUTH_STATUS_NOT_CONNECTED`, as after a disconnect. Save its credentials and connect it again. If another\nrequest changes the connection's runtime mode or stored credentials at the same time, the\nresponse is 409 and nothing changes. Send the request again.\n\nWhen the write includes `refreshFrequency` and/or `startScanFrom`, a best-effort \"conductor\npoke\" is scheduled off the request path afterward (mirrors mgr's\n`connSetRefreshFrequency`/`connSetStartScanFrom`) so the scan scheduler picks up the new\ncadence without waiting for a restart. The poke never blocks or fails the response --\nscheduling or publishing it is not on the request's critical path.\n\nReturns 204 with no body, including when the request body has no recognized fields to write\n(a no-op). Poll `GET .../{connection_id}` to observe the updated resource.",
+        "description": "Updates one or more scalar sub-doc fields on an existing connection\n(`refreshFrequency`, `startScanFrom`, `dataStorageLocation`, `businessNodeIds`,\n`credentialsExpireAt`, `connectionName`, `relyanceSecretAccess`, `runtimeMode`). Only the fields\nin the request body change; all other fields keep their values.\n\n`runtimeMode` sets the connection's runtime mode. `RELYANCE_HOSTED` is always available. For the\nother modes, the tenant must have an enabled deployment: InHost for `IN_HOST` and `IN_HOST_BYOK`,\nInHome for `IN_HOME`. If not, the response is 422 and nothing changes. Switching to\n`IN_HOST_BYOK` deletes the credentials Relyance stored for the connection, because BYOK\ncredentials stay only in the customer's environment. If that deletion fails, the mode change\nstill applies (204), and Relyance tries the deletion again at the next runtime-mode change. If\ncredential deletion is turned off, Relyance does not delete the credentials and does not try again.\nSwitching to any other mode clears the connection's secret reference (`secretRef`). A connection\nthat leaves `IN_HOST_BYOK` has no credentials that Relyance can use, so its `auth.status` becomes\n`AUTH_STATUS_NOT_CONNECTED`, as after a disconnect. Save its credentials and connect it again. If another\nrequest changes the connection's runtime mode or stored credentials at the same time, the\nresponse is 409 and nothing changes. Send the request again.\n\nWhen the write includes `refreshFrequency` and/or `startScanFrom`, a best-effort \"conductor\npoke\" is scheduled off the request path afterward (mirrors mgr's\n`connSetRefreshFrequency`/`connSetStartScanFrom`) so the scan scheduler picks up the new\ncadence without waiting for a restart. The poke never blocks or fails the response --\nscheduling or publishing it is not on the request's critical path.\n\nReturns 204 with no body, including when the request body has no recognized fields to write\n(a no-op). Poll `GET .../{connection_id}` to observe the updated resource.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -859,6 +859,20 @@
           },
           "500": {
             "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
             "content": {
               "application/problem+json": {
                 "example": {
@@ -1134,7 +1148,7 @@
       "put": {
         "operationId": "save_vendor_connection_auth_v1",
         "summary": "Save auth-field values (is_top_level split; secrets to GCP Secret Manager).",
-        "description": "Saves auth-field values for a connection. Fields flagged `is_top_level` on the vendor's\nauth form are written as flat scalars on the connection sub-doc; every other field is\nstored as a GCP Secret Manager secret.\n\nRelyance stores no credentials for an `IN_HOST_BYOK` connection. All credential fields of the\nauth method (secret and non-secret) stay in the customer's environment: in a Kubernetes secret,\nor in the AWS Secrets Manager secret that `secretRef` identifies. Relyance stores only the\ntop-level field values (`isTopLevel`), the auth method and the secret reference; it ignores\nother non-secret values. `secretRef`: absent or null leaves the stored value unchanged; an empty\nstring clears it; any other value must be an AWS Secrets Manager secret ARN\n(`arn:<partition>:secretsmanager:<region>:<account-id>:secret:<name>`, with a region in that\npartition, at most 2048 characters) in the AWS account of the tenant's Outpost deployment. A secret reference is refused\nif the tenant has no enabled Outpost deployment, if the deployment is on GCP (\"Secret references\nare available only for Outpost on AWS.\"), or if the AWS account of the deployment is not known.\nThe response is 500 if Relyance cannot read the deployment. The response is 422, and nothing\nchanges, if a secret field has a value (the error gives the field keys, never the values), if\n`secretRef` is not valid, if an app-token (browser sign-in) or JWT auth method is used with a\nsecret reference, or if a required top-level field has no value (in the request, or already stored on\nthe connection). For all other runtime modes, a non-empty `secretRef` gives 422.\n\nFor `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the\n`auth.secret_path` built against) the tenant's own GCP project rather than the service's\ndefault project. Every save also sets `auth.updated_at` (epoch seconds); when secret fields\nwere saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 digest of the\nsaved secret fields only, letting a future Terraform provider detect credential drift\nwithout ever reading a secret value back.\n\nReturns 204 with no body.",
+        "description": "Saves auth-field values for a connection. Fields flagged `is_top_level` on the vendor's\nauth form are written as flat scalars on the connection sub-doc; every other field is\nstored as a GCP Secret Manager secret.\n\nRelyance stores no credentials for an `IN_HOST_BYOK` connection. All credential fields of the\nauth method (secret and non-secret) stay in the customer's environment: in a Kubernetes secret,\nor in the AWS Secrets Manager secret that `secretRef` identifies. Relyance stores only the\ntop-level field values (`isTopLevel`), the auth method and the secret reference; it ignores\nother non-secret values. `secretRef`: absent or null leaves the stored value unchanged; an empty\nstring clears it; any other value must be an AWS Secrets Manager secret ARN\n(`arn:<partition>:secretsmanager:<region>:<account-id>:secret:<name>`, with a region in that\npartition, at most 2048 characters) in the AWS account of the tenant's Outpost deployment. A secret reference is refused\nif the tenant has no enabled Outpost deployment, if the deployment is on GCP (\"Secret references\nare available only for Outpost on AWS.\"), or if the AWS account of the deployment is not known.\nThe response is 500 if Relyance cannot read the deployment. The response is 422, and nothing\nchanges, if a secret field has a value (the error gives the field keys, never the values), if\n`secretRef` is not valid, if an app-token (browser sign-in) or JWT auth method is used with a\nsecret reference, or if a required top-level field has no value (in the request, or already stored on\nthe connection). For all other runtime modes, a non-empty `secretRef` gives 422.\n\nFor `IN_HOST`/`IN_HOME` runtime-mode connections, the secret is stored in (and the\n`auth.secret_path` built against) the tenant's own GCP project rather than the service's\ndefault project. Every save also sets `auth.updated_at` (epoch seconds); when secret fields\nwere saved it additionally sets `auth.credentials_fingerprint` -- a SHA-256 digest of the\nsaved secret fields only, letting a future Terraform provider detect credential drift\nwithout ever reading a secret value back.\n\nIf another request changes the connection's runtime mode or stored credentials at the same time,\nthe response is 409 and nothing changes. Examine the runtime mode and send the request again.\n\nReturns 204 with no body.",
         "parameters": [
           {
             "name": "vendor_key",
@@ -1241,6 +1255,20 @@
           },
           "500": {
             "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "type": "about:blank",
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "Connection not found",
+                  "code": "http_error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
             "content": {
               "application/problem+json": {
                 "example": {
