@@ -1,6 +1,6 @@
 module github.com/relyance/terraform-provider-relyance
 
-go 1.25.13
+go 1.26.0
 
 require (
 	github.com/go-jose/go-jose/v4 v4.1.4
@@ -9,7 +9,7 @@ require (
 	github.com/hashicorp/terraform-plugin-go v0.27.0
 	github.com/hashicorp/terraform-plugin-log v0.9.0
 	github.com/hashicorp/terraform-plugin-testing v1.13.0
-	golang.org/x/oauth2 v0.36.0
+	golang.org/x/oauth2 v0.37.0
 )
 
 require (
