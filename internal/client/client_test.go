@@ -179,3 +179,93 @@ func TestVendorSecretFieldKeys(t *testing.T) {
 		t.Fatal("unknown auth key should return nil")
 	}
 }
+
+func TestSaveAuthSecretRefTriState(t *testing.T) {
+	const arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:relyance/jira-AbCdEf"
+	empty := ""
+	ref := arn
+	cases := []struct {
+		name string
+		ref  *string
+		want string
+	}{
+		{"absent leaves it unchanged", nil, `{"authKey":"api-key","customCreds":{"data_storage_location":"us"}}`},
+		{"empty clears it", &empty, `{"authKey":"api-key","customCreds":{"data_storage_location":"us"},"secretRef":""}`},
+		{"value sets it", &ref, `{"authKey":"api-key","customCreds":{"data_storage_location":"us"},"secretRef":"` + arn + `"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, rec := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			})
+			err := c.SaveAuth(context.Background(), "atlassian_jira", "3", AuthSaveRequest{
+				AuthKey:     "api-key",
+				CustomCreds: map[string]any{"data_storage_location": "us"},
+				SecretRef:   tc.ref,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.body != tc.want {
+				t.Fatalf("body = %s, want %s", rec.body, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateAuthSendsSecretRef(t *testing.T) {
+	const arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:x"
+	c, rec := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"isValid": true})
+	})
+	ref := arn
+	if _, err := c.ValidateAuth(context.Background(), "atlassian_jira", "3", AuthSaveRequest{AuthKey: "api-key", SecretRef: &ref}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rec.body, `"secretRef":"`+arn+`"`) {
+		t.Fatalf("body = %s", rec.body)
+	}
+}
+
+func TestConnectionDetailRuntimeModeAndSecretRef(t *testing.T) {
+	d := &ConnectionDetail{Connection: map[string]any{}}
+	if d.RuntimeMode() != RuntimeModeRelyanceHosted {
+		t.Fatalf("absent runtime_mode = %s", d.RuntimeMode())
+	}
+	if _, ok := d.SecretRef(); ok {
+		t.Fatal("no auth → no secret_ref")
+	}
+	d.Connection["runtime_mode"] = RuntimeModeInHostBYOK
+	d.Connection["auth"] = map[string]any{"secret_ref": "arn:aws:secretsmanager:us-east-1:123456789012:secret:x"}
+	if d.RuntimeMode() != RuntimeModeInHostBYOK {
+		t.Fatalf("runtime_mode = %s", d.RuntimeMode())
+	}
+	if v, ok := d.SecretRef(); !ok || v == "" {
+		t.Fatalf("secret_ref = %q %v", v, ok)
+	}
+	d.Connection["auth"] = map[string]any{"secret_ref": nil}
+	if _, ok := d.SecretRef(); ok {
+		t.Fatal("null secret_ref must read as absent")
+	}
+}
+
+func TestCustomFieldTopLevelDecodesIsTopLevel(t *testing.T) {
+	v, err := vendorFromRaw(map[string]any{
+		"vendorKey": "atlassian_jira",
+		"authConfigs": []any{map[string]any{
+			"key": "AUTH_TYPE_API_KEY", "slug": "api-key",
+			"customFields": []any{
+				map[string]any{"key": "data_storage_location", "isTopLevel": true},
+				map[string]any{"key": "region", "isTopLevel": false},
+				map[string]any{"key": "API_KEY", "isThisSecret": true},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := v.AuthConfigs[0].CustomFields
+	if !f[0].TopLevel() || f[1].TopLevel() || f[2].TopLevel() {
+		t.Fatalf("top-level flags = %v %v %v", f[0].TopLevel(), f[1].TopLevel(), f[2].TopLevel())
+	}
+}

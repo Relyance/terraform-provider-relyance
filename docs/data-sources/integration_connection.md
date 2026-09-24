@@ -39,3 +39,5 @@ output "salesforce_connected" {
 - `auth_type` (String) Configured authentication method.
 - `integration_type` (String) Integration type.
 - `name` (String) Display name.
+- `runtime_mode` (String) Where the connection's scanner runs and where its credentials live (RELYANCE_HOSTED, IN_HOST, IN_HOME or IN_HOST_BYOK).
+- `secret_ref` (String) InHost BYOK only: ARN of the AWS Secrets Manager secret that holds the connection's credentials. Null when not set.

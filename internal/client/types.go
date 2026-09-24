@@ -23,12 +23,20 @@ type ScalarUpdateRequest struct {
 	BusinessNodeIDs      []string          `json:"businessNodeIds,omitempty"`
 	CredentialsExpireAt  *float64          `json:"credentialsExpireAt,omitempty"`
 	RelyanceSecretAccess *bool             `json:"relyanceSecretAccess,omitempty"`
+	RuntimeMode          *string           `json:"runtimeMode,omitempty"`
 }
 
 // AuthSaveRequest mirrors AuthSaveRequest.
+//
+// SecretRef is the InHost BYOK external secret reference (an AWS Secrets
+// Manager ARN), sent as secretRef (reads return it as auth.secret_ref). It is
+// tri-state on the wire: nil omits the field (the server
+// keeps the stored reference), a pointer to "" clears it, and any other value
+// sets it.
 type AuthSaveRequest struct {
 	AuthKey     string         `json:"authKey"`
 	CustomCreds map[string]any `json:"customCreds"`
+	SecretRef   *string        `json:"secretRef,omitempty"`
 }
 
 // ValidateResult mirrors AuthValidateResponseSerializer.
@@ -55,6 +63,36 @@ type ConnectionDetail struct {
 	AuthConfigs []map[string]any `json:"authConfigs"`
 	KindConfigs []map[string]any `json:"kindConfigs"`
 }
+
+// RuntimeMode returns the connection's runtime_mode. The server omits it for
+// the default, so an absent value is reported as RuntimeModeRelyanceHosted.
+func (d *ConnectionDetail) RuntimeMode() string {
+	if v, ok := d.Connection["runtime_mode"].(string); ok && v != "" {
+		return v
+	}
+	return RuntimeModeRelyanceHosted
+}
+
+// SecretRef returns the connection's auth.secret_ref (the InHost BYOK external
+// secret ARN). ok is false when it is absent, null, or empty.
+func (d *ConnectionDetail) SecretRef() (string, bool) {
+	v, ok := d.Auth()["secret_ref"].(string)
+	if !ok || v == "" {
+		return "", false
+	}
+	return v, true
+}
+
+// Runtime modes a connection can have (the connection's runtime_mode).
+const (
+	RuntimeModeRelyanceHosted = "RELYANCE_HOSTED"
+	RuntimeModeInHost         = "IN_HOST"
+	RuntimeModeInHostBYOK     = "IN_HOST_BYOK"
+	RuntimeModeInHome         = "IN_HOME"
+)
+
+// RuntimeModes lists every runtime mode the API accepts.
+var RuntimeModes = []string{RuntimeModeRelyanceHosted, RuntimeModeInHost, RuntimeModeInHostBYOK, RuntimeModeInHome}
 
 // Auth returns the connection's auth sub-document (nil if never configured).
 func (d *ConnectionDetail) Auth() map[string]any {
@@ -136,13 +174,23 @@ type AuthConfig struct {
 }
 
 // CustomField is one field in an auth form.
+//
+// The top-level flag marks fields the server stores as plain values on the
+// connection (e.g. data_storage_location) instead of in a secret. The server
+// sends isTopLevel (a passthrough field, not in the OpenAPI schema). Use
+// TopLevel() to read it.
 type CustomField struct {
 	Key          string `json:"key"`
 	Name         string `json:"name"`
 	DefaultValue string `json:"defaultValue"`
 	IsThisSecret bool   `json:"isThisSecret"`
 	FieldType    string `json:"fieldType"`
+	IsTopLevel   bool   `json:"isTopLevel"`
 }
+
+// TopLevel reports whether the field is stored as a plain value on the
+// connection rather than as a credential.
+func (f CustomField) TopLevel() bool { return f.IsTopLevel }
 
 // ConnectStatus mirrors the 202 monitor body from POST .../connect.
 type ConnectStatus struct {

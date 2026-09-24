@@ -149,3 +149,31 @@ and `API_KEY` are secret.
 its `api-key` method sends a single secret key plus a `json_config` describing the endpoints.
 
 {{ tffile "../../examples/integrations/custom_api_key.tf" }}
+
+---
+
+## InHost BYOK: credentials in your AWS Secrets Manager
+
+For an InHost BYOK ("bring your own key") connection, the credentials never reach Relyance.
+Keep every credential field of the auth method (secret and non-secret) as one JSON object in an
+AWS Secrets Manager secret in your own AWS account, and set `secret_ref` to the secret's ARN.
+Relyance stores only the ARN. The InHost scanner reads the secret at scan time.
+
+- Set `runtime_mode = "IN_HOST_BYOK"`. `secret_ref` requires it. The tenant needs an enabled InHost
+  deployment (Outpost on AWS). One apply creates the connection, sets the runtime mode, and then
+  saves `secret_ref`.
+- Do not set `auth.secrets_wo`. `auth.params` can hold only top-level fields (fields with
+  `is_top_level = true` in the `relyance_integration_vendor` data source), such as
+  `data_storage_location`. Top-level fields are not credentials: do not put them in the secret.
+- The secret must be in the AWS account of your InHost deployment, and its region must be in the
+  ARN's partition. The scanner's IAM role needs `secretsmanager:GetSecretValue` on the secret. The
+  Relyance InHost AWS Terraform module grants it when you add a matching ARN pattern to its
+  `byok_secret_arn_patterns` variable.
+- To clear the reference, remove `secret_ref` from the configuration. Switching `runtime_mode` away
+  from `IN_HOST_BYOK` also clears it. The switch also disconnects the connection until credentials
+  are saved. With an `auth` block, the same apply saves it right after the switch. Set the secret
+  fields of the method in `auth.secrets_wo` and the other fields in `auth.params`. Without an `auth`
+  block, the plan shows a warning and the connection stays disconnected. Switching to `IN_HOST_BYOK`
+  deletes any credentials Relyance holds for the connection.
+
+{{ tffile "../../examples/integrations/vendor_api_key_jira_inhost_byok_secrets_manager.tf" }}
