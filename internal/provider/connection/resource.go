@@ -186,7 +186,8 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					"its IAM role needs secretsmanager:GetSecretValue on it. Requires runtime_mode = IN_HOST_BYOK " +
 					"and an auth block; with it, auth.secrets_wo must be unset and auth.params may hold only " +
 					"top-level fields such as data_storage_location. Removing it clears the reference, and so " +
-					"does switching runtime_mode away from IN_HOST_BYOK.",
+					"does switching runtime_mode away from IN_HOST_BYOK. That switch also disconnects the " +
+					"connection until credentials are saved.",
 				Validators: []validator.String{secretRefValidator{}},
 			},
 			"runtime_mode": schema.StringAttribute{
@@ -197,8 +198,8 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					"for IN_HOST and IN_HOST_BYOK, InHome for IN_HOME). When unset, Terraform does not manage it and " +
 					"reports the current value (new connections start as RELYANCE_HOSTED). Switching to IN_HOST_BYOK " +
 					"deletes any credentials Relyance holds for the connection. Switching away from it clears secret_ref " +
-					"and disconnects the connection until credentials are saved; the apply saves the configured auth " +
-					"right after the switch.",
+					"and disconnects the connection until credentials are saved; with an auth block, the apply saves " +
+					"it right after the switch.",
 				Validators: []validator.String{stringvalidator.OneOf(client.RuntimeModes...)},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -372,10 +373,12 @@ func (r *connectionResource) Update(ctx context.Context, req resource.UpdateRequ
 
 	// A secret_ref change rides on the auth save (the server takes it with
 	// the auth method); removing it from config sends "" to clear it. Leaving
-	// BYOK also saves auth: Relyance holds no credentials for a BYOK connection,
-	// so the new mode needs the configured ones (plan-time checks they are set).
+	// BYOK with an auth block also saves auth: Relyance holds no credentials for
+	// a BYOK connection, so the new mode needs the configured ones (plan-time
+	// checks the secret fields are set). Without an auth block nothing is saved,
+	// and the connection stays disconnected (a plan warning says so).
 	secretRef := secretRefWire(plan.SecretRef, &state, plannedRuntimeMode(&plan, &state))
-	leaving := leavingBYOK(&state, plan.RuntimeMode.ValueString(), knownString(plan.RuntimeMode))
+	leaving := plan.Auth != nil && leavingBYOK(&state, plan.RuntimeMode.ValueString(), knownString(plan.RuntimeMode))
 	if authChanged(plan.Auth, state.Auth) || secretRef != nil || leaving {
 		if !r.saveAuth(ctx, req.Config, &plan, secretRef, &resp.Diagnostics) {
 			return
@@ -507,7 +510,7 @@ func (r *connectionResource) ModifyPlan(ctx context.Context, req resource.Modify
 		cfgSecrets = cfg.Auth.SecretsWO
 	}
 	resp.Diagnostics.Append(byokPlanDiags(ctx, &plan, mode, modeKnown, cfgSecrets)...)
-	resp.Diagnostics.Append(modeSwitchCredentialDiags(ctx, &cfg, state, mode, modeKnown)...)
+	resp.Diagnostics.Append(modeSwitchCredentialDiags(&cfg, state, mode, modeKnown)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -532,6 +535,12 @@ func (r *connectionResource) ModifyPlan(ctx context.Context, req resource.Modify
 		resp.Diagnostics.AddWarning("Could not validate vendor at plan time",
 			fmt.Sprintf("catalog lookup for %q failed (%s); the apply will enforce it", vendorKey, err))
 		return
+	}
+
+	if cfg.Auth != nil && leavingBYOK(state, mode, modeKnown) && knownString(cfg.Auth.Method) {
+		if matched := findAuthConfig(vendor, cfg.Auth.Method.ValueString()); matched != nil {
+			resp.Diagnostics.Append(leavingBYOKSecretDiags(ctx, cfg.Auth.SecretsWO, matched, mode)...)
+		}
 	}
 
 	if plan.Auth != nil {
@@ -740,7 +749,11 @@ func (r *connectionResource) saveAuth(ctx context.Context, config tfsdk.Config, 
 					"deployment, and secret references are available only for Outpost on AWS.")
 			return false
 		}
-		diags.AddAttributeError(path.Root("auth"), "Saving connection credentials", err.Error())
+		detail := err.Error()
+		if isConflict(err) {
+			detail += conflictHint
+		}
+		diags.AddAttributeError(path.Root("auth"), "Saving connection credentials", detail)
 		return false
 	}
 	return true
@@ -808,6 +821,9 @@ func (r *connectionResource) applyRuntimeMode(ctx context.Context, plan, prior *
 		detail += fmt.Sprintf("\n\nThe tenant needs an enabled deployment for runtime_mode %q: an InHost "+
 			"deployment for IN_HOST and IN_HOST_BYOK, an InHome deployment for IN_HOME.", want)
 	}
+	if isConflict(err) {
+		detail += conflictHint
+	}
 	diags.AddAttributeError(path.Root("runtime_mode"), "Setting runtime_mode", detail)
 	return false
 }
@@ -817,6 +833,16 @@ func (r *connectionResource) applyRuntimeMode(ctx context.Context, plan, prior *
 func isUnprocessable(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "HTTP 422")
 }
+
+// isConflict reports an HTTP 409 from the API: another request changed the
+// connection's runtime mode or stored credentials at the same time, and the
+// server changed nothing.
+func isConflict(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "HTTP 409")
+}
+
+const conflictHint = "\n\nAnother request changed this connection's runtime mode or credentials at the " +
+	"same time, and Relyance changed nothing. Run terraform apply again."
 
 func scalarsNonEmpty(s client.ScalarUpdateRequest) bool {
 	return s.ConnectionName != nil || s.RefreshFrequency != nil || s.StartScanFrom != nil ||

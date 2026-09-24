@@ -551,9 +551,10 @@ Relyance stores only the ARN. The InHost scanner reads the secret at scan time.
   `byok_secret_arn_patterns` variable.
 - To clear the reference, remove `secret_ref` from the configuration. Switching `runtime_mode` away
   from `IN_HOST_BYOK` also clears it. The switch also disconnects the connection until credentials
-  are saved. The same apply saves the configured `auth` right after the switch, so set
-  `auth.secrets_wo` and `auth.params` in the configuration. Switching to `IN_HOST_BYOK` deletes any
-  credentials Relyance holds for the connection.
+  are saved. With an `auth` block, the same apply saves it right after the switch. Set the secret
+  fields of the method in `auth.secrets_wo` and the other fields in `auth.params`. Without an `auth`
+  block, the plan shows a warning and the connection stays disconnected. Switching to `IN_HOST_BYOK`
+  deletes any credentials Relyance holds for the connection.
 
 ```terraform
 # InHost BYOK: Atlassian Jira via API key, credentials in AWS Secrets Manager

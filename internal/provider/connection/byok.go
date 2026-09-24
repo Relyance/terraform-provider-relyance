@@ -171,24 +171,57 @@ func leavingBYOK(state *resourceModel, mode string, known bool) bool {
 		knownString(state.RuntimeMode) && state.RuntimeMode.ValueString() == client.RuntimeModeInHostBYOK
 }
 
-// modeSwitchCredentialDiags: Relyance holds no credentials for an InHost BYOK
-// connection, so a switch to another runtime mode must send them (the apply
-// saves auth after the switch). Unknown auth.secrets_wo is left to the apply.
-func modeSwitchCredentialDiags(ctx context.Context, cfg *resourceModel, state *resourceModel, mode string, known bool) diag.Diagnostics {
+// modeSwitchCredentialDiags covers leaving InHost BYOK without an auth block.
+// Relyance holds no credentials for a BYOK connection, and the server
+// disconnects the connection when it leaves BYOK. With no auth block the apply
+// saves nothing, so the connection stays disconnected until credentials are
+// saved: a warning, not an error. With an auth block, leavingBYOKSecretDiags
+// checks the secret fields against the catalog.
+func modeSwitchCredentialDiags(cfg *resourceModel, state *resourceModel, mode string, known bool) diag.Diagnostics {
 	var diags diag.Diagnostics
-	if !leavingBYOK(state, mode, known) {
+	if !leavingBYOK(state, mode, known) || cfg.Auth != nil {
 		return diags
 	}
-	if cfg.Auth != nil {
-		if cfg.Auth.SecretsWO.IsUnknown() || len(mapKeys(ctx, cfg.Auth.SecretsWO, &diags)) > 0 {
-			return diags
+	diags.AddAttributeWarning(path.Root("auth"), "Connection disconnected until credentials are saved",
+		fmt.Sprintf("This connection is InHost BYOK, so Relyance holds no credentials for it. After the change "+
+			"to runtime_mode %q the connection is disconnected, and it does not scan until credentials are "+
+			"saved. To save them in this apply, add an auth block with auth.method, the secret fields in "+
+			"auth.secrets_wo and the other fields in auth.params.", mode))
+	return diags
+}
+
+// leavingBYOKSecretDiags: an auth block that leaves InHost BYOK must send the
+// secret fields of its method in auth.secrets_wo, because Relyance holds none
+// for a BYOK connection (the apply saves auth after the runtime_mode change).
+// A method with no secret fields needs nothing. Unknown auth.secrets_wo is
+// left to the apply. Needs the catalog (the secret flags).
+func leavingBYOKSecretDiags(ctx context.Context, cfgSecrets types.Map, matched *client.AuthConfig, mode string) diag.Diagnostics {
+	var diags diag.Diagnostics
+	var secretFields []string
+	for _, f := range matched.CustomFields {
+		if f.IsThisSecret {
+			secretFields = append(secretFields, f.Key)
 		}
 	}
+	if len(secretFields) == 0 || cfgSecrets.IsUnknown() || len(mapKeys(ctx, cfgSecrets, &diags)) > 0 {
+		return diags
+	}
+	sort.Strings(secretFields)
 	diags.AddAttributeError(path.Root("auth").AtName("secrets_wo"), "Credentials needed to leave InHost BYOK",
 		fmt.Sprintf("This connection is InHost BYOK, so Relyance holds no credentials for it. runtime_mode %q "+
-			"needs them: set auth.method, the secret fields in auth.secrets_wo and the other fields in "+
-			"auth.params. The apply saves them after the runtime_mode change.", mode))
+			"needs them: set the secret fields of method %s (%s) in auth.secrets_wo. The apply saves them "+
+			"after the runtime_mode change.", mode, matched.Slug, quoteJoin(secretFields)))
 	return diags
+}
+
+// findAuthConfig is the vendor's auth method whose slug or legacy key is method, or nil.
+func findAuthConfig(vendor *client.Vendor, method string) *client.AuthConfig {
+	for i := range vendor.AuthConfigs {
+		if ac := &vendor.AuthConfigs[i]; ac.Slug == method || ac.Key == method {
+			return ac
+		}
+	}
+	return nil
 }
 
 // byokParamDiags rejects auth.params keys that are not top-level fields of the
