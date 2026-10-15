@@ -8,6 +8,7 @@ package connection
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -333,7 +334,7 @@ func applyScans(ctx context.Context, svc Service, vendorKey, id string, plan, st
 				return diags
 			}
 		}
-		if want.Enabled.ValueBool() && (!existed || !had.Fields.Equal(want.Fields)) {
+		if want.Enabled.ValueBool() && (!existed || !had.Enabled.ValueBool() || !had.Fields.Equal(want.Fields)) {
 			params, d := fieldsToParams(ctx, want.Fields)
 			diags.Append(d...)
 			if diags.HasError() {
@@ -405,7 +406,39 @@ func (m *resourceModel) refreshScans(ctx context.Context, d *client.ConnectionDe
 		if b, ok := sv["isSelected"].(bool); ok {
 			enabled = types.BoolValue(b)
 		}
-		out[slug] = scanModel{Enabled: enabled, Fields: want.Fields}
+		fields := want.Fields
+		// Read only keys Terraform manages. Server defaults must not become
+		// configuration, but changed/deleted managed values must produce drift.
+		// Disabled scans have not applied their fields yet (applyScans saves
+		// fields only when enabled), so keep that pending configuration intact.
+		if want.Enabled.ValueBool() && !fields.IsNull() && !fields.IsUnknown() {
+			values := map[string]attr.Value{}
+			serverFields, _ := sv["customFields"].([]any)
+			for _, raw := range serverFields {
+				field, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				key, _ := field["key"].(string)
+				if _, managed := fields.Elements()[key]; !managed || field["value"] == nil {
+					continue
+				}
+				value, isString := field["value"].(string)
+				if !isString {
+					encoded, err := json.Marshal(field["value"])
+					if err != nil {
+						diags.AddAttributeError(path.Root("scans").AtMapKey(slug).AtName("fields"), "Reading scan fields", err.Error())
+						return diags
+					}
+					value = string(encoded)
+				}
+				values[key] = types.StringValue(value)
+			}
+			var d diag.Diagnostics
+			fields, d = types.MapValue(types.StringType, values)
+			diags.Append(d...)
+		}
+		out[slug] = scanModel{Enabled: enabled, Fields: fields}
 	}
 	m2, d3 := types.MapValueFrom(ctx, scanObjectType(), out)
 	diags.Append(d3...)

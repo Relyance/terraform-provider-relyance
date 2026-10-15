@@ -688,7 +688,7 @@ func TestRefreshScans(t *testing.T) {
 		}
 	})
 
-	t.Run("server isSelected overrides Enabled but Fields stay the practitioner's", func(t *testing.T) {
+	t.Run("server isSelected and absent managed fields override prior enabled scan", func(t *testing.T) {
 		fields := strMap(t, map[string]string{"sampling": "5"})
 		m := &resourceModel{Scans: scanMap(t, map[string]scanModel{
 			"data-inspection": {Enabled: types.BoolValue(true), Fields: fields},
@@ -706,8 +706,8 @@ func TestRefreshScans(t *testing.T) {
 		if sc.Enabled.ValueBool() {
 			t.Fatal("Enabled should be overridden to false from server isSelected")
 		}
-		if !sc.Fields.Equal(fields) {
-			t.Fatalf("Fields should be untouched: got %v, want %v", sc.Fields, fields)
+		if !sc.Fields.Equal(strMap(t, map[string]string{})) {
+			t.Fatalf("absent fields must be planned back when re-enabling: got %v", sc.Fields)
 		}
 	})
 
