@@ -8,6 +8,7 @@ package connection
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -327,23 +328,36 @@ func applyScans(ctx context.Context, svc Service, vendorKey, id string, plan, st
 
 	for slug, want := range desired {
 		had, existed := prior[slug]
-		if !existed || !had.Enabled.Equal(want.Enabled) {
-			if err := svc.SelectKind(ctx, vendorKey, id, slug, want.Enabled.ValueBool()); err != nil {
-				diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Selecting scan", err.Error())
-				return diags
-			}
-		}
-		if want.Enabled.ValueBool() && (!existed || !had.Fields.Equal(want.Fields)) {
-			params, d := fieldsToParams(ctx, want.Fields)
+		selectionChanged := !existed || !had.Enabled.Equal(want.Enabled)
+		var params []map[string]any
+		if !existed || !had.Fields.Equal(want.Fields) || (want.Enabled.ValueBool() && !had.Enabled.ValueBool()) {
+			var d diag.Diagnostics
+			params, d = fieldsToParams(ctx, want.Fields)
 			diags.Append(d...)
 			if diags.HasError() {
 				return diags
 			}
-			if len(params) > 0 {
-				if err := svc.SaveKind(ctx, vendorKey, id, slug, params); err != nil {
-					diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Saving scan fields", err.Error())
-					return diags
-				}
+		}
+		// The API accepts settings on a disabled kind, but its sub-document
+		// must exist. Initialize it with selected=false, then store settings
+		// before explicitly requesting selected=true. Always-enabled API kinds
+		// remain governed by the server's selection policy.
+		if (!want.Enabled.ValueBool() && selectionChanged) || (!existed && len(params) > 0) {
+			if err := svc.SelectKind(ctx, vendorKey, id, slug, false); err != nil {
+				diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Selecting scan", err.Error())
+				return diags
+			}
+		}
+		if len(params) > 0 {
+			if err := svc.SaveKind(ctx, vendorKey, id, slug, params); err != nil {
+				diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Saving scan fields", err.Error())
+				return diags
+			}
+		}
+		if want.Enabled.ValueBool() && selectionChanged {
+			if err := svc.SelectKind(ctx, vendorKey, id, slug, true); err != nil {
+				diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Selecting scan", err.Error())
+				return diags
 			}
 		}
 	}
@@ -398,14 +412,45 @@ func (m *resourceModel) refreshScans(ctx context.Context, d *client.ConnectionDe
 	for slug, want := range desired {
 		sv, ok := serverBySlug[slug]
 		if !ok {
-			out[slug] = want
-			continue
+			diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Reading scan settings",
+				"The API did not return this managed scan kind. Its selection and settings could not be verified; restore the scan kind before applying changes.")
+			return diags
 		}
 		enabled := want.Enabled
 		if b, ok := sv["isSelected"].(bool); ok {
 			enabled = types.BoolValue(b)
 		}
-		out[slug] = scanModel{Enabled: enabled, Fields: want.Fields}
+		fields := want.Fields
+		// Read only keys Terraform manages. Server defaults must not become
+		// configuration, but changed/deleted managed values must produce drift.
+		if !fields.IsNull() && !fields.IsUnknown() {
+			values := map[string]attr.Value{}
+			serverFields, _ := sv["customFields"].([]any)
+			for _, raw := range serverFields {
+				field, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				key, _ := field["key"].(string)
+				if _, managed := fields.Elements()[key]; !managed || field["value"] == nil {
+					continue
+				}
+				value, isString := field["value"].(string)
+				if !isString {
+					encoded, err := json.Marshal(field["value"])
+					if err != nil {
+						diags.AddAttributeError(path.Root("scans").AtMapKey(slug).AtName("fields"), "Reading scan fields", err.Error())
+						return diags
+					}
+					value = string(encoded)
+				}
+				values[key] = types.StringValue(value)
+			}
+			var d diag.Diagnostics
+			fields, d = types.MapValue(types.StringType, values)
+			diags.Append(d...)
+		}
+		out[slug] = scanModel{Enabled: enabled, Fields: fields}
 	}
 	m2, d3 := types.MapValueFrom(ctx, scanObjectType(), out)
 	diags.Append(d3...)
