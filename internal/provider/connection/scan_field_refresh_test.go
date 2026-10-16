@@ -73,3 +73,21 @@ func TestRefreshScansReadsDisabledFields(t *testing.T) {
 		t.Fatalf("missing disabled fields must be planned back before activation: %v", out)
 	}
 }
+
+func TestRefreshScansRejectsMissingManagedKind(t *testing.T) {
+	ctx := context.Background()
+	for _, kinds := range []any{nil, map[string]any{}} {
+		m := &resourceModel{Scans: scanMap(t, map[string]scanModel{
+			"data-inspection": {Enabled: types.BoolValue(true), Fields: strMap(t, map[string]string{"store_samples": "false"})},
+		})}
+		prior := m.Scans
+		d := &client.ConnectionDetail{Connection: map[string]any{"kinds": kinds}}
+		diags := m.refreshScans(ctx, d)
+		if !diags.HasError() {
+			t.Fatal("missing managed kind must not report prior scan settings as verified")
+		}
+		if !m.Scans.Equal(prior) {
+			t.Fatal("failed refresh must preserve state until the missing server kind is resolved")
+		}
+	}
+}

@@ -664,7 +664,7 @@ func TestRefreshScans(t *testing.T) {
 		}
 	})
 
-	t.Run("desired slug absent from server kinds -> kept as-is, no invention", func(t *testing.T) {
+	t.Run("desired slug absent from server kinds -> diagnostic, state preserved", func(t *testing.T) {
 		fields := strMap(t, map[string]string{"sampling": "5"})
 		m := &resourceModel{Scans: scanMap(t, map[string]scanModel{
 			"data-inspection": {Enabled: types.BoolValue(true), Fields: fields},
@@ -672,8 +672,8 @@ func TestRefreshScans(t *testing.T) {
 		diags := m.refreshScans(ctx, &client.ConnectionDetail{Connection: map[string]any{
 			"kinds": map[string]any{},
 		}})
-		if diags.HasError() {
-			t.Fatalf("unexpected diags: %v", diags)
+		if !diags.HasError() {
+			t.Fatal("missing managed scan kind must fail verification")
 		}
 		out, d := scansFromMap(ctx, m.Scans)
 		if d.HasError() {

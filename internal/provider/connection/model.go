@@ -412,8 +412,9 @@ func (m *resourceModel) refreshScans(ctx context.Context, d *client.ConnectionDe
 	for slug, want := range desired {
 		sv, ok := serverBySlug[slug]
 		if !ok {
-			out[slug] = want
-			continue
+			diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Reading scan settings",
+				"The API did not return this managed scan kind. Its selection and settings could not be verified; restore the scan kind before applying changes.")
+			return diags
 		}
 		enabled := want.Enabled
 		if b, ok := sv["isSelected"].(bool); ok {
