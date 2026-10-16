@@ -135,7 +135,8 @@ func scanMap(t *testing.T, entries map[string]scanModel) types.Map {
 
 type recordSvc struct {
 	Service
-	calls []string
+	calls   []string
+	saveErr error
 }
 
 func (r *recordSvc) SelectKind(_ context.Context, _, _, kind string, selected bool) error {
@@ -144,7 +145,41 @@ func (r *recordSvc) SelectKind(_ context.Context, _, _, kind string, selected bo
 }
 func (r *recordSvc) SaveKind(_ context.Context, _, _, kind string, params []map[string]any) error {
 	r.calls = append(r.calls, fmt.Sprintf("save %s(%d)", kind, len(params)))
-	return nil
+	return r.saveErr
+}
+
+func TestApplyScansSettingsBeforeEnable(t *testing.T) {
+	fields := strMap(t, map[string]string{"store_samples": "false"})
+	for _, tc := range []struct {
+		name     string
+		prior    *scanModel
+		enabled  bool
+		failSave bool
+		want     string
+	}{
+		{"new enabled kind", nil, true, false, "[select data-inspection=false save data-inspection(1) select data-inspection=true]"},
+		{"new disabled kind", nil, false, false, "[select data-inspection=false save data-inspection(1)]"},
+		{"enable configured disabled kind", &scanModel{Enabled: types.BoolValue(false), Fields: fields}, true, false, "[save data-inspection(1) select data-inspection=true]"},
+		{"update already enabled kind", &scanModel{Enabled: types.BoolValue(true), Fields: strMap(t, map[string]string{"store_samples": "true"})}, true, false, "[save data-inspection(1)]"},
+		{"save failure leaves new kind disabled", nil, true, true, "[select data-inspection=false save data-inspection(1)]"},
+		{"save failure does not enable existing kind", &scanModel{Enabled: types.BoolValue(false), Fields: fields}, true, true, "[save data-inspection(1)]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prior := types.MapNull(scanObjectType())
+			if tc.prior != nil {
+				prior = scanMap(t, map[string]scanModel{"data-inspection": *tc.prior})
+			}
+			plan := scanMap(t, map[string]scanModel{"data-inspection": {Enabled: types.BoolValue(tc.enabled), Fields: fields}})
+			svc := &recordSvc{}
+			if tc.failSave {
+				svc.saveErr = fmt.Errorf("synthetic save failure")
+			}
+			diags := applyScans(context.Background(), svc, "aws_rds", "test", plan, prior)
+			if diags.HasError() != tc.failSave || fmt.Sprint(svc.calls) != tc.want {
+				t.Fatalf("calls=%v want=%s diagnostics=%v", svc.calls, tc.want, diags)
+			}
+		})
+	}
 }
 
 func TestApplyScansDiffing(t *testing.T) {
@@ -157,11 +192,11 @@ func TestApplyScansDiffing(t *testing.T) {
 		return scanModel{Enabled: types.BoolValue(true), Fields: f}
 	}
 
-	// New scan with fields → select + save.
+	// New scan with fields → create disabled, save, then enable.
 	svc := &recordSvc{}
 	plan := scanMap(t, map[string]scanModel{"data-inspection": on(map[string]string{"sampling": "10"})})
 	applyScans(ctx, svc, "aws_s3", "1", plan, types.MapNull(scanObjectType()))
-	if len(svc.calls) != 2 || svc.calls[0] != "select data-inspection=true" || svc.calls[1] != "save data-inspection(1)" {
+	if len(svc.calls) != 3 || svc.calls[0] != "select data-inspection=false" || svc.calls[1] != "save data-inspection(1)" || svc.calls[2] != "select data-inspection=true" {
 		t.Fatalf("new-scan calls = %v", svc.calls)
 	}
 

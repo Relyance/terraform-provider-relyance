@@ -328,23 +328,36 @@ func applyScans(ctx context.Context, svc Service, vendorKey, id string, plan, st
 
 	for slug, want := range desired {
 		had, existed := prior[slug]
-		if !existed || !had.Enabled.Equal(want.Enabled) {
-			if err := svc.SelectKind(ctx, vendorKey, id, slug, want.Enabled.ValueBool()); err != nil {
-				diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Selecting scan", err.Error())
-				return diags
-			}
-		}
-		if want.Enabled.ValueBool() && (!existed || !had.Enabled.ValueBool() || !had.Fields.Equal(want.Fields)) {
-			params, d := fieldsToParams(ctx, want.Fields)
+		selectionChanged := !existed || !had.Enabled.Equal(want.Enabled)
+		var params []map[string]any
+		if !existed || !had.Fields.Equal(want.Fields) || (want.Enabled.ValueBool() && !had.Enabled.ValueBool()) {
+			var d diag.Diagnostics
+			params, d = fieldsToParams(ctx, want.Fields)
 			diags.Append(d...)
 			if diags.HasError() {
 				return diags
 			}
-			if len(params) > 0 {
-				if err := svc.SaveKind(ctx, vendorKey, id, slug, params); err != nil {
-					diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Saving scan fields", err.Error())
-					return diags
-				}
+		}
+		// The API accepts settings on a disabled kind, but its sub-document
+		// must exist. Initialize it with selected=false, then store settings
+		// before explicitly requesting selected=true. Always-enabled API kinds
+		// remain governed by the server's selection policy.
+		if (!want.Enabled.ValueBool() && selectionChanged) || (!existed && len(params) > 0) {
+			if err := svc.SelectKind(ctx, vendorKey, id, slug, false); err != nil {
+				diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Selecting scan", err.Error())
+				return diags
+			}
+		}
+		if len(params) > 0 {
+			if err := svc.SaveKind(ctx, vendorKey, id, slug, params); err != nil {
+				diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Saving scan fields", err.Error())
+				return diags
+			}
+		}
+		if want.Enabled.ValueBool() && selectionChanged {
+			if err := svc.SelectKind(ctx, vendorKey, id, slug, true); err != nil {
+				diags.AddAttributeError(path.Root("scans").AtMapKey(slug), "Selecting scan", err.Error())
+				return diags
 			}
 		}
 	}
@@ -409,9 +422,7 @@ func (m *resourceModel) refreshScans(ctx context.Context, d *client.ConnectionDe
 		fields := want.Fields
 		// Read only keys Terraform manages. Server defaults must not become
 		// configuration, but changed/deleted managed values must produce drift.
-		// Disabled scans have not applied their fields yet (applyScans saves
-		// fields only when enabled), so keep that pending configuration intact.
-		if want.Enabled.ValueBool() && !fields.IsNull() && !fields.IsUnknown() {
+		if !fields.IsNull() && !fields.IsUnknown() {
 			values := map[string]attr.Value{}
 			serverFields, _ := sv["customFields"].([]any)
 			for _, raw := range serverFields {

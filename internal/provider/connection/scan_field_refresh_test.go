@@ -20,8 +20,8 @@ func TestApplyScansSavesPendingFieldsWhenEnabled(t *testing.T) {
 	if diags := applyScans(context.Background(), svc, "aws_rds", "test", plan, state); diags.HasError() {
 		t.Fatalf("unexpected diagnostics: %v", diags)
 	}
-	if len(svc.calls) != 2 || !strings.HasPrefix(svc.calls[1], "savekind ") {
-		t.Fatalf("enabling must select then save pending fields, got %v", svc.calls)
+	if len(svc.calls) != 2 || !strings.HasPrefix(svc.calls[0], "savekind ") {
+		t.Fatalf("enabling must save pending fields before selecting, got %v", svc.calls)
 	}
 }
 
@@ -57,7 +57,7 @@ func TestRefreshScansReadsManagedFields(t *testing.T) {
 	}
 }
 
-func TestRefreshScansPreservesUnappliedDisabledFields(t *testing.T) {
+func TestRefreshScansReadsDisabledFields(t *testing.T) {
 	fields := strMap(t, map[string]string{"store_samples": "false"})
 	m := &resourceModel{Scans: scanMap(t, map[string]scanModel{
 		"data-inspection": {Enabled: types.BoolValue(false), Fields: fields},
@@ -69,7 +69,7 @@ func TestRefreshScansPreservesUnappliedDisabledFields(t *testing.T) {
 		t.Fatalf("unexpected diagnostics: %v", diags)
 	}
 	out, _ := scansFromMap(context.Background(), m.Scans)
-	if !out["data-inspection"].Fields.Equal(fields) {
-		t.Fatalf("disabled fields must stay configured until the scan is enabled: %v", out)
+	if !out["data-inspection"].Fields.Equal(strMap(t, map[string]string{})) {
+		t.Fatalf("missing disabled fields must be planned back before activation: %v", out)
 	}
 }
