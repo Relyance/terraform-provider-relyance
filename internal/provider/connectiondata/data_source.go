@@ -33,14 +33,15 @@ type connDataSource struct {
 }
 
 type model struct {
-	Vendor          types.String `tfsdk:"vendor"`
-	ID              types.String `tfsdk:"id"`
-	Name            types.String `tfsdk:"name"`
-	IntegrationType types.String `tfsdk:"integration_type"`
-	AuthStatus      types.String `tfsdk:"auth_status"`
-	AuthType        types.String `tfsdk:"auth_type"`
-	RuntimeMode     types.String `tfsdk:"runtime_mode"`
-	SecretRef       types.String `tfsdk:"secret_ref"`
+	Vendor             types.String `tfsdk:"vendor"`
+	ID                 types.String `tfsdk:"id"`
+	Name               types.String `tfsdk:"name"`
+	IntegrationType    types.String `tfsdk:"integration_type"`
+	AuthStatus         types.String `tfsdk:"auth_status"`
+	AuthType           types.String `tfsdk:"auth_type"`
+	RuntimeMode        types.String `tfsdk:"runtime_mode"`
+	InhostDeploymentID types.String `tfsdk:"inhost_deployment_id"`
+	SecretRef          types.String `tfsdk:"secret_ref"`
 }
 
 func (d *connDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -53,14 +54,15 @@ func (d *connDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 			"connections managed outside Terraform — e.g. gating on a browser-authorized " +
 			"OAuth connection's auth_status.",
 		Attributes: map[string]schema.Attribute{
-			"vendor":           schema.StringAttribute{Required: true, Description: "Vendor identifier, e.g. aws_s3."},
-			"id":               schema.StringAttribute{Required: true, Description: "Connection id."},
-			"name":             schema.StringAttribute{Computed: true, Description: "Display name."},
-			"integration_type": schema.StringAttribute{Computed: true, Description: "Integration type."},
-			"auth_status":      schema.StringAttribute{Computed: true, Description: "Live credential status (e.g. AUTH_STATUS_CONNECTED)."},
-			"auth_type":        schema.StringAttribute{Computed: true, Description: "Configured authentication method."},
-			"runtime_mode":     schema.StringAttribute{Computed: true, Description: "Where the connection's scanner runs and where its credentials live (RELYANCE_HOSTED, IN_HOST, IN_HOME or IN_HOST_BYOK)."},
-			"secret_ref":       schema.StringAttribute{Computed: true, Description: "InHost BYOK only: ARN of the AWS Secrets Manager secret that holds the connection's credentials. Null when not set."},
+			"vendor":               schema.StringAttribute{Required: true, Description: "Vendor identifier, e.g. aws_s3."},
+			"id":                   schema.StringAttribute{Required: true, Description: "Connection id."},
+			"name":                 schema.StringAttribute{Computed: true, Description: "Display name."},
+			"integration_type":     schema.StringAttribute{Computed: true, Description: "Integration type."},
+			"auth_status":          schema.StringAttribute{Computed: true, Description: "Live credential status (e.g. AUTH_STATUS_CONNECTED)."},
+			"auth_type":            schema.StringAttribute{Computed: true, Description: "Configured authentication method."},
+			"inhost_deployment_id": schema.StringAttribute{Computed: true, Description: "Assigned InHost deployment ID; null for an unassigned connection."},
+			"runtime_mode":         schema.StringAttribute{Computed: true, Description: "Where the connection's scanner runs and where its credentials live (RELYANCE_HOSTED, IN_HOST, IN_HOME or IN_HOST_BYOK)."},
+			"secret_ref":           schema.StringAttribute{Computed: true, Description: "InHost BYOK only: ARN of the AWS Secrets Manager secret that holds the connection's credentials. Null when not set."},
 		},
 	}
 }
@@ -110,6 +112,7 @@ func (d *connDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		out.AuthType = types.StringNull()
 	}
 	out.RuntimeMode = types.StringValue(detail.RuntimeMode())
+	out.InhostDeploymentID = strOrNull(detail, "inhost_deployment_id")
 	if ref, ok := detail.SecretRef(); ok {
 		out.SecretRef = types.StringValue(ref)
 	} else {

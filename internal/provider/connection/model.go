@@ -74,6 +74,7 @@ type resourceModel struct {
 	ConnectOnApply      types.Bool                `tfsdk:"connect_on_apply"`
 	SecretRef           types.String              `tfsdk:"secret_ref"`
 	RuntimeMode         types.String              `tfsdk:"runtime_mode"`
+	InhostDeploymentID  types.String              `tfsdk:"inhost_deployment_id"`
 }
 
 // dataStorageLocationModel is the Relyance Location shape (region/country/state,
@@ -295,6 +296,8 @@ func (m *resourceModel) refreshFromAPI(ctx context.Context, d *client.Connection
 	// manage, so a reference added or removed outside Terraform shows as drift
 	// (and import picks it up).
 	m.RuntimeMode = types.StringValue(d.RuntimeMode())
+	id, _ := d.StringField("inhost_deployment_id")
+	m.InhostDeploymentID = nullIfEmpty(id)
 	if v, ok := d.SecretRef(); ok {
 		m.SecretRef = types.StringValue(v)
 	} else {

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -181,7 +182,7 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Optional: true,
 				Description: "InHost BYOK only: ARN of an AWS Secrets Manager secret that holds every credential " +
 					"field of auth.method (secret and non-secret) as one JSON object. The secret must be in the AWS " +
-					"account of your InHost deployment (Outpost on AWS), and its region must be in the ARN's " +
+					"account and execution region of your selected InHost deployment (Outpost on AWS), and its region must be in the ARN's " +
 					"partition. Relyance stores only this ARN; the InHost scanner reads the secret at scan time, so " +
 					"its IAM role needs secretsmanager:GetSecretValue on it. Requires runtime_mode = IN_HOST_BYOK " +
 					"and an auth block; with it, auth.secrets_wo must be unset and auth.params may hold only " +
@@ -189,6 +190,12 @@ func (r *connectionResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					"does switching runtime_mode away from IN_HOST_BYOK. That switch also disconnects the " +
 					"connection until credentials are saved.",
 				Validators: []validator.String{secretRefValidator{}},
+			},
+			"inhost_deployment_id": schema.StringAttribute{
+				Optional: true, Computed: true,
+				Validators:    []validator.String{stringvalidator.RegexMatches(regexp.MustCompile(`^[a-z][a-z0-9-]{0,19}$`), "Use a lowercase deployment ID of at most 20 characters.")},
+				Description:   "Stable InHost deployment ID. Mode and assignment are saved atomically before credentials. Omit to retain the server assignment. Changing deployment is permitted only before first accepted InHost work and with no pending dispatch; disconnect and clear an existing secret reference first. Later moves require a new connection.",
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"runtime_mode": schema.StringAttribute{
 				Optional: true,
@@ -548,7 +555,7 @@ func (r *connectionResource) ModifyPlan(ctx context.Context, req resource.Modify
 		// When this apply changes it, that answer is for the wrong mode (for
 		// example, secretRef is refused on a connection that is not yet BYOK), so
 		// only the catalog checks run; the apply's auth save enforces the rest.
-		serverValidate := state != nil && modeKnown && storedRuntimeMode(state) == mode
+		serverValidate := state != nil && modeKnown && storedRuntimeMode(state) == mode && (!knownString(plan.InhostDeploymentID) || plan.InhostDeploymentID.Equal(state.InhostDeploymentID))
 		r.validateAuthPlan(ctx, req, resp, &plan, modeKnown && mode == client.RuntimeModeInHostBYOK, serverValidate, vendor)
 	}
 }
@@ -775,6 +782,12 @@ func (r *connectionResource) readBack(ctx context.Context, m *resourceModel) (ok
 	if err != nil {
 		return false, err.Error()
 	}
+	if knownString(m.InhostDeploymentID) {
+		got, _ := detail.StringField("inhost_deployment_id")
+		if got != m.InhostDeploymentID.ValueString() {
+			return false, "The server did not store inhost_deployment_id; the API may not support regional InHost assignment."
+		}
+	}
 	wantRef := m.SecretRef
 	if got, _ := detail.SecretRef(); knownString(wantRef) && got != wantRef.ValueString() {
 		// Name the cause instead of letting Terraform report an inconsistent result.
@@ -811,18 +824,32 @@ func plannedRuntimeMode(plan, prior *resourceModel) string {
 // applyRuntimeMode PATCHes runtime_mode when the plan sets it to a value the
 // connection does not have yet (prior nil on create). Returns false on error.
 func (r *connectionResource) applyRuntimeMode(ctx context.Context, plan, prior *resourceModel, diags *diag.Diagnostics) bool {
-	if !knownString(plan.RuntimeMode) {
+	modeChanged := knownString(plan.RuntimeMode) && (prior == nil && plan.RuntimeMode.ValueString() != client.RuntimeModeRelyanceHosted || prior != nil && !plan.RuntimeMode.Equal(prior.RuntimeMode))
+	assignmentChanged := knownString(plan.InhostDeploymentID) && (prior == nil || !plan.InhostDeploymentID.Equal(prior.InhostDeploymentID))
+	if !modeChanged && !assignmentChanged {
 		return true
 	}
-	want := plan.RuntimeMode.ValueString()
-	if prior == nil && want == client.RuntimeModeRelyanceHosted {
-		return true // new connections start there
+	want := plannedRuntimeMode(plan, prior)
+	req := client.ScalarUpdateRequest{RuntimeMode: &want}
+	if assignmentChanged {
+		id := plan.InhostDeploymentID.ValueString()
+		req.InhostDeploymentID = &id
 	}
-	if prior != nil && plan.RuntimeMode.Equal(prior.RuntimeMode) {
-		return true
-	}
-	err := r.svc.UpdateScalars(ctx, plan.Vendor.ValueString(), plan.ID.ValueString(), client.ScalarUpdateRequest{RuntimeMode: &want})
+	err := r.svc.UpdateScalars(ctx, plan.Vendor.ValueString(), plan.ID.ValueString(), req)
 	if err == nil {
+		// Verify binding before any auth save or connect: old servers can silently ignore additive fields.
+		if assignmentChanged {
+			detail, readErr := r.svc.Get(ctx, plan.Vendor.ValueString(), plan.ID.ValueString())
+			if readErr != nil {
+				diags.AddAttributeError(path.Root("inhost_deployment_id"), "Verifying InHost deployment", readErr.Error())
+				return false
+			}
+			got, _ := detail.StringField("inhost_deployment_id")
+			if got != plan.InhostDeploymentID.ValueString() || detail.RuntimeMode() != want {
+				diags.AddAttributeError(path.Root("inhost_deployment_id"), "InHost assignment was not stored", "The server did not store the requested runtime mode and deployment binding. This API may not support regional InHost assignment. Upgrade the server before saving credentials or connecting.")
+				return false
+			}
+		}
 		return true
 	}
 	detail := err.Error()
@@ -860,5 +887,5 @@ const conflictHint = "\n\nAnother request changed this connection's runtime mode
 func scalarsNonEmpty(s client.ScalarUpdateRequest) bool {
 	return s.ConnectionName != nil || s.RefreshFrequency != nil || s.StartScanFrom != nil ||
 		s.DataStorageLocation != nil || s.BusinessNodeIDs != nil || s.CredentialsExpireAt != nil ||
-		s.RelyanceSecretAccess != nil || s.RuntimeMode != nil
+		s.RelyanceSecretAccess != nil || s.RuntimeMode != nil || s.InhostDeploymentID != nil
 }
