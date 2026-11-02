@@ -37,6 +37,7 @@ output "salesforce_connected" {
 
 - `auth_status` (String) Live credential status (e.g. AUTH_STATUS_CONNECTED).
 - `auth_type` (String) Configured authentication method.
+- `inhost_deployment_id` (String) Assigned InHost deployment ID; null for an unassigned connection.
 - `integration_type` (String) Integration type.
 - `name` (String) Display name.
 - `runtime_mode` (String) Where the connection's scanner runs and where its credentials live (RELYANCE_HOSTED, IN_HOST, IN_HOME or IN_HOST_BYOK).

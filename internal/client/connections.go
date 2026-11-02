@@ -112,6 +112,9 @@ func scalarUpdateToAPI(req ScalarUpdateRequest) apiclient.ScalarUpdateRequest {
 	if req.RuntimeMode != nil {
 		b.SetRuntimeMode(*req.RuntimeMode)
 	}
+	if req.InhostDeploymentID != nil {
+		b.SetInhostDeploymentId(*req.InhostDeploymentID)
+	}
 	return b
 }
 

@@ -24,6 +24,7 @@ type ScalarUpdateRequest struct {
 	CredentialsExpireAt  *float64          `json:"credentialsExpireAt,omitempty"`
 	RelyanceSecretAccess *bool             `json:"relyanceSecretAccess,omitempty"`
 	RuntimeMode          *string           `json:"runtimeMode,omitempty"`
+	InhostDeploymentID   *string           `json:"inhostDeploymentId,omitempty"`
 }
 
 // AuthSaveRequest mirrors AuthSaveRequest.

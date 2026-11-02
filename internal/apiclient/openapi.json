@@ -2472,6 +2472,19 @@
               }
             ],
             "title": "Runtimemode"
+          },
+          "inhostDeploymentId": {
+            "title": "Inhostdeploymentid",
+            "description": "Stable deployment ID. Updated atomically with runtimeMode; omitted or null retains the current assignment.",
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,19}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,

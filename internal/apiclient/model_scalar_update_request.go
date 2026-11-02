@@ -27,6 +27,7 @@ type ScalarUpdateRequest struct {
 	CredentialsExpireAt  NullableInt64               `json:"credentialsExpireAt,omitempty"`
 	RelyanceSecretAccess NullableBool                `json:"relyanceSecretAccess,omitempty"`
 	RuntimeMode          NullableString              `json:"runtimeMode,omitempty"`
+	InhostDeploymentId   NullableString              `json:"inhostDeploymentId,omitempty" validate:"regexp=^[a-z][a-z0-9-]{0,19}$"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -383,6 +384,49 @@ func (o *ScalarUpdateRequest) UnsetRuntimeMode() {
 	o.RuntimeMode.Unset()
 }
 
+// GetInhostDeploymentId returns the InhostDeploymentId field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ScalarUpdateRequest) GetInhostDeploymentId() string {
+	if o == nil || IsNil(o.InhostDeploymentId.Get()) {
+		var ret string
+		return ret
+	}
+	return *o.InhostDeploymentId.Get()
+}
+
+// GetInhostDeploymentIdOk returns a tuple with the InhostDeploymentId field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *ScalarUpdateRequest) GetInhostDeploymentIdOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.InhostDeploymentId.Get(), o.InhostDeploymentId.IsSet()
+}
+
+// HasInhostDeploymentId returns a boolean if a field has been set.
+func (o *ScalarUpdateRequest) HasInhostDeploymentId() bool {
+	if o != nil && o.InhostDeploymentId.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetInhostDeploymentId gets a reference to the given NullableString and assigns it to the InhostDeploymentId field.
+func (o *ScalarUpdateRequest) SetInhostDeploymentId(v string) {
+	o.InhostDeploymentId.Set(&v)
+}
+
+// SetInhostDeploymentIdNil sets the value for InhostDeploymentId to be an explicit nil
+func (o *ScalarUpdateRequest) SetInhostDeploymentIdNil() {
+	o.InhostDeploymentId.Set(nil)
+}
+
+// UnsetInhostDeploymentId ensures that no value is present for InhostDeploymentId, not even an explicit nil
+func (o *ScalarUpdateRequest) UnsetInhostDeploymentId() {
+	o.InhostDeploymentId.Unset()
+}
+
 func (o ScalarUpdateRequest) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -417,6 +461,9 @@ func (o ScalarUpdateRequest) ToMap() (map[string]interface{}, error) {
 	if o.RuntimeMode.IsSet() {
 		toSerialize["runtimeMode"] = o.RuntimeMode.Get()
 	}
+	if o.InhostDeploymentId.IsSet() {
+		toSerialize["inhostDeploymentId"] = o.InhostDeploymentId.Get()
+	}
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -447,6 +494,7 @@ func (o *ScalarUpdateRequest) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "credentialsExpireAt")
 		delete(additionalProperties, "relyanceSecretAccess")
 		delete(additionalProperties, "runtimeMode")
+		delete(additionalProperties, "inhostDeploymentId")
 		o.AdditionalProperties = additionalProperties
 	}
 
